@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+premissas_local.json
+grid_snapshot_local.json
+audios_tmp/
+*.wav
+*.xlsx
+avinor_db_explore.json
+avinor_db_summary.json
