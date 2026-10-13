@@ -9,7 +9,7 @@ from datetime import date, timedelta
 import streamlit as st
 
 from app.constants import MESES_NOME, label_mes
-from app.dates_util import month_bounds
+from app.dates_util import business_days_between, month_bounds
 from app.pacing import (
     day_bounds,
     days_in_month,
@@ -19,48 +19,38 @@ from app.pacing import (
 
 _PACING_CSS = """
 <style>
-.pacing-cal-anchor { height: 0; overflow: hidden; margin: 0; padding: 0; }
-.pacing-cal-panel {
-    max-width: 420px; background: linear-gradient(165deg, #f8fafc 0%, #fff 45%, #f0f9ff 100%);
-    border-radius: 16px; padding: 1rem 1.15rem 0.9rem;
-    border: 1px solid #dbeafe; box-shadow: 0 4px 20px rgba(21, 101, 192, 0.08);
-    margin: 0.5rem 0 0.75rem;
+[class*="st-key-cal_box_"] {
+    max-width: 360px; background: #fff; border: 1px solid #e3e9e6; border-radius: 16px;
+    padding: 0.85rem 0.9rem 0.7rem; box-shadow: 0 6px 22px rgba(18, 38, 29, 0.07);
+    gap: 0.15rem !important; margin: 0.4rem 0 0.6rem;
 }
-.pacing-cal-panel .cal-title {
-    text-align: center; font-weight: 800; font-size: 1.08rem; color: #0f172a;
-    margin-bottom: 0.5rem; letter-spacing: 0.02em;
+[class*="st-key-cal_box_"] .cal-head {
+    display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.45rem;
 }
-.pacing-cal-panel .cal-sub {
-    text-align: center; font-size: 0.75rem; color: #64748b; margin-bottom: 0.65rem;
+[class*="st-key-cal_box_"] .cal-head strong { font-size: 1rem; color: #1f2d27; }
+[class*="st-key-cal_box_"] .cal-head span { font-size: 0.72rem; color: #6b7a73; }
+[class*="st-key-cal_box_"] .cal-wd {
+    display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: 0.55rem;
 }
-.pacing-cal-panel .cal-wd {
-    display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
-    margin-bottom: 0.35rem; padding: 0.35rem 0.25rem; border-radius: 10px;
-    background: #f3f4f6;
+[class*="st-key-cal_box_"] .cal-wd span {
+    text-align: center; font-size: 0.68rem; color: #8a9891; font-weight: 600; text-transform: uppercase;
 }
-.pacing-cal-panel .cal-wd span {
-    text-align: center; font-size: 0.72rem; color: #6b7280; font-weight: 500;
+[class*="st-key-cal_box_"] [data-testid="stHorizontalBlock"] { gap: 0 !important; }
+[class*="st-key-cal_box_"] [data-testid="stColumn"] { min-width: 0 !important; }
+[class*="st-key-cal_box_"] button {
+    min-height: 2.1rem !important; height: 2.1rem; padding: 0 !important; border: none !important;
+    border-radius: 10px !important; font-size: 0.82rem !important; font-weight: 600 !important;
+    transition: background 0.12s ease;
 }
-.pacing-cal-panel .cal-wd span.we { font-weight: 800; color: #374151; }
-div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) [data-testid="stHorizontalBlock"] {
-    gap: 0.25rem !important;
+[class*="st-key-cal_box_"] button[kind="tertiary"] { background: transparent !important; color: #1f2d27; }
+[class*="st-key-cal_box_"] button[kind="tertiary"]:hover { background: #eef2ef !important; }
+[class*="st-key-cal_box_"] button[kind="secondary"] {
+    background: #e3efe9 !important; color: #1f4d3a !important; border-radius: 0 !important;
 }
-div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) [data-testid="column"] button {
-    min-height: 2.15rem !important; border-radius: 999px !important;
-    font-size: 0.82rem !important; font-weight: 600 !important;
-    border: none !important; padding: 0.2rem !important;
+[class*="st-key-cal_box_"] button[kind="primary"] {
+    background: #2f6b55 !important; color: #fff !important; border-radius: 10px !important;
+    box-shadow: 0 3px 10px rgba(47, 107, 85, 0.35) !important;
 }
-div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) button[kind="primary"] {
-    background: #1565c0 !important; color: #fff !important;
-    box-shadow: 0 0 0 2px #fff, 0 0 0 3px #1565c0 !important;
-}
-div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) button[kind="secondary"] {
-    background: #e3f2fd !important; color: #1565c0 !important;
-}
-div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) button[kind="tertiary"] {
-    background: transparent !important; color: #9ca3af !important;
-}
-.pacing-cal-hint { font-size: 0.78rem; color: #6b7280; margin-top: 0.35rem; }
 .meta-drum-stack { position: relative; min-height: 2.6rem; }
 .meta-drum-main {
     font-size: 1.75rem; font-weight: 700; color: #0f3328;
@@ -70,7 +60,7 @@ div[data-testid="stVerticalBlock"]:has(.pacing-cal-anchor) button[kind="tertiary
     font-size: 0.82rem; color: #6b7280; margin-top: 0.15rem;
     transition: transform 0.45s ease, opacity 0.35s ease;
 }
-.meta-drum-real .meta-drum-main { color: #c2410c; animation: meta-drum-in 0.5s ease; }
+.meta-drum-real .meta-drum-main { color: #1f4d3a; animation: meta-drum-in 0.5s ease; }
 .meta-drum-behind .meta-drum-main { color: #dc2626; }
 .meta-drum-ahead .meta-drum-main { color: #047857; }
 @keyframes meta-drum-in {
@@ -93,6 +83,20 @@ class PacingView:
     period_label: str
     period_index: int
     n_periods: int
+    peso_periodo: float = 1.0
+    peso_acum: float = 1.0
+
+
+def _pesos_dias_uteis(ano: int, mes: int, ini: date, fim_exclusive: date) -> tuple[float, float]:
+    """Fração da meta do mês no período e do dia 1 até o fim do período (por dias úteis)."""
+    start, end = month_bounds(ano, mes)
+    total = business_days_between(start, end)
+    if total <= 0:
+        return 1.0, 1.0
+    return (
+        business_days_between(ini, fim_exclusive) / total,
+        business_days_between(start, fim_exclusive) / total,
+    )
 
 
 def _day_key(prefix: str, ano: int, mes: int) -> str:
@@ -134,6 +138,7 @@ def pacing_view_from_lente_day(ano: int, mes: int, lente: str, selected: date) -
             n_periods=1,
         )
     if lente == "Semanal":
+        peso, peso_acum = _pesos_dias_uteis(ano, mes, week.ini, week.fim_exclusive)
         return PacingView(
             lente=lente,
             ini=week.ini,
@@ -143,8 +148,11 @@ def pacing_view_from_lente_day(ano: int, mes: int, lente: str, selected: date) -
             period_label=week.label,
             period_index=week.index,
             n_periods=len(weeks),
+            peso_periodo=peso,
+            peso_acum=peso_acum,
         )
     d_ini, d_fim = day_bounds(ano, mes, selected.day)
+    peso, peso_acum = _pesos_dias_uteis(ano, mes, d_ini, d_fim)
     return PacingView(
         lente=lente,
         ini=d_ini,
@@ -154,6 +162,8 @@ def pacing_view_from_lente_day(ano: int, mes: int, lente: str, selected: date) -
         period_label=selected.strftime("%d/%m/%Y"),
         period_index=selected.day - 1,
         n_periods=n_days,
+        peso_periodo=peso,
+        peso_acum=peso_acum,
     )
 
 
@@ -172,58 +182,66 @@ def _render_calendar_picker(
 ) -> None:
     n_days = days_in_month(ano, mes)
     start, _ = month_bounds(ano, mes)
-    title = f"{MESES_NOME[mes]} {ano}"
-    wd_html = "".join(
-        f'<span class="{"we" if i in (0, 6) else ""}">{w}</span>' for i, w in enumerate(_WD)
-    )
-    st.markdown(
-        f"""
-        <div class="pacing-cal-panel">
-          <div class="pacing-cal-title">{html.escape(title)}</div>
-          <div class="cal-sub">Toque no dia · semana em destaque</div>
-          <div class="cal-wd">{wd_html}</div>
-        </div>
-        <div class="pacing-cal-anchor"></div>
-        """,
-        unsafe_allow_html=True,
-    )
-
+    hoje = date.today()
     pad = _sunday_col(start)
     cells: list[int | None] = [None] * pad + list(range(1, n_days + 1))
     while len(cells) % 7 != 0:
         cells.append(None)
 
+    def bkey(day_num: int, row_i: int) -> str:
+        return f"{key_prefix}_cal_{ano}_{mes}_{day_num}_{row_i}"
+
+    extra_css = []
     for row_i in range(0, len(cells), 7):
-        cols = st.columns(7)
-        for col_i, col in enumerate(cols):
-            day_num = cells[row_i + col_i]
-            with col:
+        semana = [
+            c for c in cells[row_i:row_i + 7]
+            if c and week.ini <= date(ano, mes, c) < week.fim_exclusive
+        ]
+        if semana:
+            extra_css.append(
+                f".st-key-{bkey(semana[0], row_i)} button{{border-radius:10px 0 0 10px !important}}"
+                f".st-key-{bkey(semana[-1], row_i)} button{{border-radius:0 10px 10px 0 !important}}"
+            )
+        for col_i, c in enumerate(cells[row_i:row_i + 7]):
+            if c and col_i in (0, 6):
+                extra_css.append(f".st-key-{bkey(c, row_i)} button{{color:#9aa7a1 !important}}")
+            if c and date(ano, mes, c) == hoje:
+                extra_css.append(
+                    f".st-key-{bkey(c, row_i)} button{{box-shadow:inset 0 -3px 0 #b7d96b !important}}"
+                )
+
+    wd_html = "".join(f"<span>{w}</span>" for w in _WD)
+    with st.container(key=f"cal_box_{key_prefix}"):
+        st.markdown(
+            f"<style>{''.join(extra_css)}</style>"
+            f'<div class="cal-head"><strong>{html.escape(MESES_NOME[mes])} {ano}</strong>'
+            f"<span>{html.escape(week.label)} · dia {selected.day:02d}</span></div>"
+            f'<div class="cal-wd">{wd_html}</div>',
+            unsafe_allow_html=True,
+        )
+        for row_i in range(0, len(cells), 7):
+            cols = st.columns(7, gap=None)
+            for col_i, col in enumerate(cols):
+                day_num = cells[row_i + col_i]
                 if day_num is None:
-                    st.write("")
                     continue
                 d = date(ano, mes, day_num)
-                in_week = week.ini <= d < week.fim_exclusive
-                is_sel = day_num == selected.day
-                if is_sel:
+                if day_num == selected.day:
                     kind = "primary"
-                elif in_week:
+                elif week.ini <= d < week.fim_exclusive:
                     kind = "secondary"
                 else:
                     kind = "tertiary"
-                if st.button(
-                    f"{day_num:02d}",
-                    key=f"{key_prefix}_cal_{ano}_{mes}_{day_num}_{row_i}",
-                    type=kind,
-                    use_container_width=True,
-                ):
-                    st.session_state[dk] = d.isoformat()
-                    if not defer_rerun:
-                        st.rerun()
-
-    st.markdown(
-        f'<p class="pacing-cal-hint">{html.escape(week.label)} · dia {selected.day:02d}</p>',
-        unsafe_allow_html=True,
-    )
+                with col:
+                    if st.button(
+                        f"{day_num}",
+                        key=bkey(day_num, row_i),
+                        type=kind,
+                        use_container_width=True,
+                    ):
+                        st.session_state[dk] = d.isoformat()
+                        if not defer_rerun:
+                            st.rerun()
 
 
 def render_pacing_controls(
@@ -231,6 +249,7 @@ def render_pacing_controls(
     mes: int,
     key_prefix: str = "pacing",
     defer_apply: bool = True,
+    always_calendar: bool = False,
 ) -> PacingView:
     st.markdown(_PACING_CSS, unsafe_allow_html=True)
     start, end = month_bounds(ano, mes)
@@ -263,7 +282,7 @@ def render_pacing_controls(
     week = week_for_date(ano, mes, selected)
     use_apply = defer_apply and key_prefix in ("rank", "colab")
 
-    if lente in ("Semanal", "Diário"):
+    if always_calendar or lente in ("Semanal", "Diário"):
         _render_calendar_picker(
             ano, mes, selected, week, key_prefix, dk, defer_rerun=use_apply
         )
@@ -274,18 +293,17 @@ def render_pacing_controls(
 
     if use_apply:
         dirty = pending != st.session_state[snap_key]
-        btn_col, hint_col = st.columns([1, 2])
-        with btn_col:
-            if st.button(
-                "Atualizar cards",
-                type="primary" if dirty else "secondary",
-                key=f"{key_prefix}_pacing_apply_{ano}_{mes}",
-            ):
-                st.session_state[snap_key] = dict(pending)
-                st.rerun()
-        with hint_col:
-            if dirty:
-                st.caption("Calendário alterado — clique **Atualizar cards**.")
+        if st.button(
+            "Atualizar cards",
+            type="primary" if dirty else "secondary",
+            key=f"{key_prefix}_pacing_apply_{ano}_{mes}",
+            icon=":material/refresh:",
+            use_container_width=True,
+        ):
+            st.session_state[snap_key] = dict(pending)
+            st.rerun()
+        if dirty:
+            st.caption("Período alterado — clique **Atualizar cards**.")
         snap = st.session_state[snap_key]
     else:
         snap = pending

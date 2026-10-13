@@ -191,11 +191,10 @@ def pacing_faturamento_dia(
 def pacing_faturamento_janela(
     meta_mes: float,
     realizado_janela: float,
-    period_index: int,
-    n_periods: int,
+    peso_periodo: float,
 ) -> PacingFat:
-    """Somente o período (ex.: semana 2 isolada)."""
-    planejada = meta_mes / n_periods if n_periods > 0 else 0.0
+    """Somente o período (ex.: semana 2 isolada); peso = fração de dias úteis do mês."""
+    planejada = meta_mes * max(peso_periodo, 0.0)
     ating = (realizado_janela / planejada * 100) if planejada > 0 else 0.0
     falta = max(planejada - realizado_janela, 0.0)
     return PacingFat(
@@ -215,13 +214,10 @@ def pacing_faturamento_janela(
 def pacing_faturamento_acumulado(
     meta_mes: float,
     realizado_acum: float,
-    period_index: int,
-    n_periods: int,
+    peso_acum: float,
 ) -> PacingFat:
-    """Do dia 1 até o fim do período selecionado (modo Real)."""
-    if n_periods <= 0:
-        n_periods = 1
-    meta_acum = meta_mes * (period_index + 1) / n_periods
+    """Do dia 1 até o fim do período selecionado; peso = fração de dias úteis já cobertos."""
+    meta_acum = meta_mes * max(peso_acum, 0.0)
     gap = realizado_acum - meta_acum
     falta = max(meta_acum - realizado_acum, 0.0)
     ating = (realizado_acum / meta_acum * 100) if meta_acum > 0 else 0.0
@@ -251,9 +247,9 @@ def pacing_faturamento_acumulado(
 def pacing_cobertura_janela(
     meta_mes_clientes: int,
     clientes_janela: int,
-    n_periods: int,
+    peso_periodo: float,
 ) -> PacingCob:
-    meta_j = float(meta_mes_clientes) / n_periods if n_periods > 0 else 0.0
+    meta_j = float(meta_mes_clientes) * max(peso_periodo, 0.0)
     ating = (clientes_janela / meta_j * 100) if meta_j > 0 else 0.0
     return PacingCob(
         meta_mes_clientes=meta_mes_clientes,
@@ -269,12 +265,9 @@ def pacing_cobertura_janela(
 def pacing_cobertura_acumulada(
     meta_mes_clientes: int,
     clientes_acum: int,
-    period_index: int,
-    n_periods: int,
+    peso_acum: float,
 ) -> PacingCob:
-    if n_periods <= 0:
-        n_periods = 1
-    meta_acum = float(meta_mes_clientes) * (period_index + 1) / n_periods
+    meta_acum = float(meta_mes_clientes) * max(peso_acum, 0.0)
     gap = clientes_acum - meta_acum
     ating = (clientes_acum / meta_acum * 100) if meta_acum > 0 else 0.0
     if abs(gap) < 0.5:

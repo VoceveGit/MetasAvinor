@@ -13,7 +13,7 @@ from app.data import (
 )
 from app.dates_util import month_bounds
 from app.meta_frigosol import montar_bloco_frigosol
-from app.meta_proporcional import meta_empresa_mensal_ref
+from app.plano_metas import meta_empresa_mes
 from app.premissas import (
     PremissaEmpresa,
     PremissaVendedor,
@@ -124,8 +124,7 @@ def render_meta_empresa_mes(
             st.success("Premissas salvas. Rode **Atualizar conferência** no Início ou vá às outras abas.")
             st.rerun()
 
-        emp_atual = get_premissa_empresa(ano, mes)
-        emp_ref = meta_empresa_mensal_ref(emp_atual)
+        emp_ref = meta_empresa_mes(ano, mes)
         if defer_analytics:
             if emp_ref > 0:
                 st.caption(f"Meta mensal de referência: **{_fmt_brl_short(emp_ref)}**")
@@ -198,7 +197,7 @@ def aplicar_premissas_sugeridas_pendentes(ano: int, mes: int, taxa: float) -> in
                 conversao_meta_pct=round(bloco.conversao_meta * 100, 1),
                 meta_cobertura_qtd=bloco.cobertura_meta,
                 meta_recorrencia=bloco.recorrencia_meta,
-                meta_positivacao=bloco.oport_calc_positivacao,
+                meta_positivacao=bloco.positivacoes_meta,
                 tx_conv_projetada_pct=round(bloco.conversao_meta * 100, 1),
                 ticket_meta=bloco.ticket_meta,
                 taxa_cobertura=taxa,
@@ -249,7 +248,7 @@ def render_premissas_vendedores_checklist(
         st.success(f"{n} colaborador(es) atualizados.")
         st.rerun()
     st.caption(
-        "Meta em R$ em lote: seção **2 · Metas da equipe (tabela)**. Alavancas: seção **3**."
+        "Meta em R$ de cada colaborador: tabela da seção **2 · Metas do mês**."
     )
 
 

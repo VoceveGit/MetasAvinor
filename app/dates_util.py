@@ -25,15 +25,20 @@ def week_bounds(d: date) -> tuple[date, date]:
     return start, end
 
 
-def business_days_in_month(ano: int, mes: int) -> int:
-    start, end = month_bounds(ano, mes)
-    d = start
+def business_days_between(inicio: date, fim_exclusive: date) -> int:
+    """Dias úteis (seg–sex) em [inicio, fim_exclusive)."""
+    d = inicio
     n = 0
-    while d < end:
+    while d < fim_exclusive:
         if d.weekday() < 5:
             n += 1
         d += timedelta(days=1)
     return n
+
+
+def business_days_in_month(ano: int, mes: int) -> int:
+    start, end = month_bounds(ano, mes)
+    return business_days_between(start, end)
 
 
 def business_days_elapsed_in_month(ano: int, mes: int, ref: date | None = None) -> int:

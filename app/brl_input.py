@@ -61,6 +61,41 @@ def _apply_format(key: str, decimals: int) -> None:
         st.session_state[key] = format_br_number(val, decimals)
 
 
+_MASK_JS = """
+<script>
+(function () {
+  const sel = '.st-key-__KEY__ input';
+  const fmt = (d) => d.replace(/^0+(?=\\d)/, '').replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+  function bind(tries) {
+    const el = document.querySelector(sel);
+    if (!el) { if (tries > 0) setTimeout(() => bind(tries - 1), 200); return; }
+    if (el.dataset.brlMask) return;
+    el.dataset.brlMask = '1';
+    el.setAttribute('inputmode', 'numeric');
+    el.addEventListener('input', () => {
+      const pos = el.selectionStart || 0;
+      const digitsLeft = el.value.slice(0, pos).replace(/\\D/g, '').length;
+      const out = fmt(el.value.replace(/\\D/g, ''));
+      if (out === el.value) return;
+      setter.call(el, out);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      let p = 0, seen = 0;
+      while (p < out.length && seen < digitsLeft) { if (/\\d/.test(out[p])) seen++; p++; }
+      el.setSelectionRange(p, p);
+    });
+  }
+  bind(25);
+})();
+</script>
+"""
+
+
+def _mask_live(container_key: str) -> None:
+    """Formata 200.000.000 enquanto digita (o valor salvo continua vindo do Python)."""
+    st.html(_MASK_JS.replace("__KEY__", container_key), unsafe_allow_javascript=True)
+
+
 def brl_text_input(
     label: str,
     value: float,
@@ -89,7 +124,10 @@ def brl_text_input(
     def _on_blur() -> None:
         _apply_format(key, decimals)
 
-    st.text_input(label, key=key, help=help_txt, on_change=_on_blur)
+    with st.container(key=f"brlmask_{key}"):
+        st.text_input(label, key=key, help=help_txt, on_change=_on_blur)
+    if decimals <= 0:
+        _mask_live(f"brlmask_{key}")
 
     raw = st.session_state.get(key, "")
     try:

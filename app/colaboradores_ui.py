@@ -1,19 +1,24 @@
 from __future__ import annotations
 
+from datetime import date
+
 import streamlit as st
 
 from app.constants import label_mes
-from app.data import load_grid_metas_colaboradores, load_ranking_periodo
-from app.dates_util import month_bounds
-from app.equipe_grid_logic import aplicar_premissa_salva, loader_rows_to_state, premissa_tem_prescricao
+from app.data import (
+    load_equipe_mes,
+    load_grid_metas_colaboradores,
+    load_realizado_mes,
+    load_vendedor_realizado_intervalo,
+)
+from app.dates_util import business_days_between, month_bounds
+from app.equipe_grid_logic import aplicar_premissa_salva, loader_rows_to_state, valor_efetivo
 from app.meta_resolve import resolve_meta_mes_cob
 from app.formatting import fmt_brl_cell
 from app.grid_snapshot import load_grid_snapshot, row_for_vendedor
 from app.pacing_service import build_pacing_cob, build_pacing_fat, meta_periodo_display
 from app.meta_proporcional import enrich_row_proporcional
 from app.pacing_ui import PacingView, meta_drum_html, render_pacing_controls
-from app.premissas import get_premissa, vendedor_tem_premissa
-
 _COLAB_CSS = """
 <style>
 .colab-page { margin-top: 0.25rem; }
@@ -35,18 +40,47 @@ _COLAB_CSS = """
     flex-direction: column;
 }
 .colab-card-spacer { flex: 1 1 auto; min-height: 1rem; }
+.colab-dark-bar { position: relative; height: 8px; border-radius: 8px; background: rgba(255,255,255,.14); margin: 1.1rem 0 .9rem; }
+.colab-dark-bar i { display: block; height: 100%; border-radius: 8px; background: #b7d96b; animation: avinor-grow 1s cubic-bezier(.2,.8,.2,1); }
+@keyframes avinor-grow { from { width: 0; } }
+.colab-dark-bar b { position: absolute; top: -4px; width: 2px; height: 16px; background: #fff; opacity: .8; }
+.colab-dark-mini { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+.colab-dark-mini div { background: rgba(255,255,255,.07); border-radius: 10px; padding: .55rem .65rem; }
+.colab-dark-mini span { display: block; font-size: .7rem; opacity: .75; text-transform: uppercase; letter-spacing: .04em; }
+.colab-dark-mini strong { font-size: 1.02rem; }
+.colab-dark-status { margin-top: .75rem; font-size: .82rem; font-weight: 600; }
+.colab-dark-status.ok { color: #b7d96b; }
+.colab-dark-status.late { color: #fcd34d; }
+.colab-dark-proj { margin-top: .5rem; font-size: .8rem; color: #dbe7e0; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.colab-dark-proj strong { color: #fff; }
+.colab-dark-proj .pill { font-weight: 800; font-size: .7rem; padding: .12rem .5rem; border-radius: 999px; }
+.colab-dark-proj .pill.ok { background: #b7d96b; color: #12261d; }
+.colab-dark-proj .pill.atencao { background: #fcd34d; color: #4a3500; }
+.colab-dark-proj .pill.critico { background: #f87171; color: #3b0a0a; }
 .colab-realizado-col-marker {
     display: none !important;
     height: 0 !important;
 }
-div[data-testid="column"]:has(.colab-realizado-col-marker) {
-    min-height: 332px !important;
-    box-sizing: border-box !important;
-}
-div[data-testid="column"]:has(.colab-realizado-col-marker) .colab-card-dark.colab-card-stretch {
-    min-height: 308px !important;
+[data-testid="stElementContainer"]:has(.colab-realizado-col-marker) { display: none !important; }
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) > [data-testid="stVerticalBlock"],
+[data-testid="stColumn"]:has(.colab-ritmo-card-anchor) > [data-testid="stVerticalBlock"] {
     height: 100% !important;
 }
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) [data-testid="stElementContainer"]:has(.colab-card-dark) {
+    flex: 1 1 auto !important;
+}
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) [data-testid="stElementContainer"]:has(.colab-card-dark) > div,
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) [data-testid="stElementContainer"]:has(.colab-card-dark) div:has(> [data-testid="stMarkdownContainer"]),
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) [data-testid="stElementContainer"]:has(.colab-card-dark) [data-testid="stMarkdownContainer"],
+[data-testid="stColumn"]:has(.colab-realizado-col-marker) .colab-card-dark.colab-card-stretch {
+    height: 100% !important;
+}
+[data-testid="stColumn"]:has(.colab-ritmo-card-anchor) > [data-testid="stVerticalBlock"] > [data-testid="stLayoutWrapper"],
+[data-testid="stColumn"]:has(.colab-ritmo-card-anchor) > [data-testid="stVerticalBlock"] > div:has(.colab-ritmo-card-anchor) {
+    flex: 1 1 auto !important;
+}
+.colab-dark-bar b { cursor: help; }
+.colab-dark-bar b::before { content: ""; position: absolute; inset: -6px -6px; }
 [data-testid="stVerticalBlockBorderWrapper"]:has(.colab-ritmo-card-anchor) {
     background: #eef6e8 !important;
     border-color: #b8d4b0 !important;
@@ -128,7 +162,7 @@ div[data-testid="column"]:has(.colab-realizado-col-marker) .colab-card-dark.cola
 @media (max-width: 500px) { .colab-light-body { grid-template-columns: 1fr; } }
 .colab-ring {
     width: 140px; height: 140px; border-radius: 50%;
-    background: conic-gradient(#1a4d3e var(--pct), #f5e6d8 0);
+    background: conic-gradient(#1a4d3e var(--pct), #e3efe9 0);
     display: flex; align-items: center; justify-content: center; margin: 0 auto;
 }
 .colab-ring-inner {
@@ -239,6 +273,19 @@ def _bar_segs(pct: float, fill: str = "#1a4d3e", empty: str = "#e5e7eb") -> str:
     )
 
 
+def _n(v: float) -> str:
+    return f"{int(round(float(v or 0))):,}".replace(",", ".")
+
+
+def _pct(v: float, decimals: int = 1, sinal: bool = False) -> str:
+    fmt = f"{{:{'+' if sinal else ''}.{decimals}f}}%"
+    return fmt.format(float(v or 0)).replace(".", ",")
+
+
+def _dec(v: float, decimals: int = 1) -> str:
+    return f"{float(v or 0):.{decimals}f}".replace(".", ",")
+
+
 def _f(row: dict, key: str, default: float = 0.0) -> float:
     v = row.get(key)
     if v is None:
@@ -307,9 +354,7 @@ def _render_hero_v2(
 ):
     """Hero: origem da meta + acumulado (igual Ranking)."""
     col_l, col_r = st.columns(2, gap="medium")
-    meta_opts = ["Manual", "Calculada"]
-    if meta_prop > 0:
-        meta_opts.append("Proporcional")
+    meta_opts = (["Plano"] if meta_prop > 0 else []) + ["Manual", "Calculada"]
 
     with col_r:
         ritmo_card = st.container(border=True)
@@ -319,12 +364,6 @@ def _render_hero_v2(
                 '<p class="colab-light-head-inline">🎯 Ritmo da meta</p>',
                 unsafe_allow_html=True,
             )
-            meta_sel = st.segmented_control(
-                "Origem da meta",
-                meta_opts,
-                default=modo if modo in meta_opts else meta_opts[0],
-                key=f"{toggle_key}_meta",
-            )
             acumulado = st.checkbox(
                 "Acumulado do mês",
                 value=False,
@@ -332,7 +371,7 @@ def _render_hero_v2(
                 key=f"{toggle_key}_acum",
             )
 
-    meta_ref = meta_sel or modo
+    meta_ref = meta_opts[0]
     row_stub = {
         "meta_prop_mes_rs": meta_prop,
         "cob_prop_sug": cob_prop,
@@ -388,10 +427,48 @@ def _render_hero_v2(
             f'{fmt_brl_cell(meta_periodo) if meta_periodo > 0 else "—"}</div></div>'
         )
 
-    uso_label = f"Meta do período ({modo_atual.lower()})"
+    uso_label = "Meta do período"
     primary_label = "Meta prescrita do mês"
     secondary_label = "Meta planejada no período"
     planejada_show = planejada_periodo
+
+    hoje = date.today()
+    dias_tot = max(business_days_between(view.ini, view.fim_exclusive), 1)
+    if hoje >= view.fim_exclusive:
+        dias_passados = dias_tot
+    else:
+        dias_passados = business_days_between(view.ini, max(hoje, view.ini))
+    dias_rest = dias_tot - dias_passados
+    esperado = meta_periodo * dias_passados / dias_tot if meta_periodo > 0 else 0
+    por_dia = falta / dias_rest if dias_rest > 0 else 0
+    mini_html = (
+        f'<div class="colab-dark-bar"><i style="width:{min(ating, 100):.1f}%"></i>'
+        f'<b style="left:{min(100, dias_passados / dias_tot * 100):.1f}%" '
+        f'title="Onde deveria estar hoje: {fmt_brl_cell(esperado)} ({dias_passados} de {dias_tot} dias úteis). '
+        f'Se a barra verde não passou deste traço, está abaixo do ritmo."></b></div>'
+        f'<div class="colab-dark-mini">'
+        f'<div><span>Atingido</span><strong>{ating:.0f}%</strong></div>'
+        f'<div><span>Esperado até hoje</span><strong>{fmt_brl_cell(esperado) if esperado else "—"}</strong></div>'
+        f'<div><span>Precisa por dia útil</span><strong>{fmt_brl_cell(por_dia) if por_dia else "—"}</strong></div>'
+        f"</div>"
+    ) if meta_periodo > 0 else ""
+
+    from app.ranking_ui import _STATUS_TXT, ritmo_mes
+
+    a_m, m_m = view.ini.year, view.ini.month
+    if view.lente == "Mensal":
+        real_mes_tot = real
+    else:
+        real_mes_tot = load_vendedor_realizado_intervalo(vendedor_id, *month_bounds(a_m, m_m))["faturamento"]
+    rt = ritmo_mes(real_mes_tot, meta_mes_prescrita, a_m, m_m)
+    if rt["proj_pct"] is not None:
+        mini_html += (
+            f'<div class="colab-dark-proj" title="Realizado do mês ÷ dias úteis passados × dias úteis do mês. '
+            f'Verde ≥ 100% da meta, amarelo 85–100%, vermelho &lt; 85%.">'
+            f'<span class="pill {rt["status"]}">● {_STATUS_TXT[rt["status"]]}</span>'
+            f'Projeção do mês <strong>{fmt_brl_cell(rt["proj"])}</strong> ({rt["proj_pct"]:.0f}%)'
+            f' · {rt["du_rest"]} dia(s) útil(eis) restante(s)</div>'
+        )
 
     with col_l:
         st.markdown('<div class="colab-realizado-col-marker"></div>', unsafe_allow_html=True)
@@ -404,6 +481,7 @@ def _render_hero_v2(
               </div>
               <div class="colab-big">{fmt_brl_cell(real)}</div>
               <div style="font-size:0.92rem;opacity:0.92;">{view.period_label}</div>
+              {mini_html}
               <div class="colab-card-spacer"></div>
               <div class="colab-footer-metrics">
                 <div>
@@ -420,7 +498,7 @@ def _render_hero_v2(
             unsafe_allow_html=True,
         )
 
-    ajuste_html = ""
+    ajuste_html = "<!-- -->"
     if view.lente != "Mensal" and pf.ajuste_label:
         ajuste_html = f'<div class="colab-meta-ref">{pf.ajuste_label}</div>'
 
@@ -454,8 +532,8 @@ def _render_hero_v2(
                   </div>
                   {ajuste_html}
                   <div class="colab-meta-ref">
-                    Modo <strong>{modo_atual}</strong> · {view.lente.lower()}.
-                    Ticket médio segue o prescrito do mês (comparado ao realizado no período).
+                    Meta do mês do Início (manual, se houver; senão automática) · {view.lente.lower()}.
+                    Campos azuis vazios usam a sugestão.
                   </div>
                 </div>
               </div>
@@ -465,33 +543,62 @@ def _render_hero_v2(
         )
 
 
-def _render_caminho(r: dict):
+def _render_caminho(r: dict, mes_atual: dict):
     cart = int(_f(r, "carteira"))
     oport = int(_f(r, "oportunidades_mes"))
     ocalc = int(_f(r, "oport_calc_pos"))
-    conv = _f(r, "conv_meta_pct")
+    conv = valor_efetivo(r, "conv_meta_pct")
     tx_hist = _f(r, "tx_conv_hist_pct")
     cob = int(_f(r, "cobertura_meta_clientes"))
-    tx_proj = _f(r, "tx_conv_projetada_pct")
-    dif = int(_f(r, "diff_carteira_cob"))
+    tx_proj = valor_efetivo(r, "tx_conv_projetada_pct")
     cob_media = _f(r, "cob_media_clientes_3m")
-    ticket = _f(r, "ticket_meta")
+    ticket = valor_efetivo(r, "ticket_meta")
     ticket_hist = _f(r, "ticket_historico")
+    rec_meta = valor_efetivo(r, "recorrencia_meta")
+    posit_meta = int(round(cob * rec_meta)) if cob > 0 and rec_meta > 0 else 0
     dif_ticket = ticket - ticket_hist if ticket > 0 and ticket_hist > 0 else 0
     pct_ticket = (dif_ticket / ticket_hist * 100) if ticket_hist > 0 else 0
-    pct_cob = (cob / cart * 100) if cart > 0 and cob > 0 else 0
-    bar_segs = _bar_segs(pct_cob)
-    clientes_mes = int(_f(r, "clientes_mes"))
-    pct_oport = (clientes_mes / ocalc * 100) if ocalc > 0 else 0
-    if ocalc <= 0 and conv > 0 and tx_hist > 0:
-        pct_oport = min(tx_hist / conv * 100, 100)
+
+    clientes_mes = int(mes_atual.get("clientes") or 0)
+    notas_mes = int(mes_atual.get("notas") or 0)
+    real_mes = float(mes_atual.get("faturamento") or 0)
+
+    pct_cob_prog = (clientes_mes / cob * 100) if cob > 0 else 0
+    bar_segs = _bar_segs(pct_cob_prog)
+    faltam_cli = max(cob - clientes_mes, 0)
+    sem_compra = max(cart - clientes_mes, 0)
+    if cob <= 0:
+        cob_prog_lbl = "Defina a TX projetada no Início para ter meta de cobertura."
+    elif faltam_cli > 0:
+        cob_prog_lbl = (
+            f"<strong>Faltam {_n(faltam_cli)} clientes</strong> da carteira comprarem "
+            f"· {_n(clientes_mes)} já compraram, {_n(sem_compra)} ainda não"
+        )
+    else:
+        cob_prog_lbl = f"<strong>Meta de cobertura batida</strong> · {_n(clientes_mes)} clientes compraram"
+    if posit_meta > 0:
+        faltam_pos = max(posit_meta - notas_mes, 0)
+        posit_lbl = (
+            f"Positivações: <strong>{_n(notas_mes)}</strong> de {_n(posit_meta)}"
+            + (f" · faltam {_n(faltam_pos)}" if faltam_pos > 0 else " · meta batida")
+        )
+    else:
+        posit_lbl = "Positivações: defina a recorrência no Início."
+
+    pct_oport = (notas_mes / ocalc * 100) if ocalc > 0 else 0
     bar_oport = _bar_segs(pct_oport, fill="#1d4ed8", empty="#e5e7eb")
-    real_mes = _f(r, "realizado_mes")
-    ticket_real = (real_mes / clientes_mes) if clientes_mes > 0 and real_mes > 0 else 0
+    oport_prog_lbl = (
+        f"Notas no mês: {_n(notas_mes)} de {_n(ocalc)} esperadas pela conversão "
+        f"({pct_oport:.0f}%)"
+        if ocalc > 0
+        else f"Conversão histórica {_pct(tx_hist)} · defina a conversão meta no Início."
+    )
+
+    ticket_real = (real_mes / notas_mes) if notas_mes > 0 and real_mes > 0 else 0
     if ticket > 0 and ticket_real > 0:
         pct_ticket_prog = min(ticket_real / ticket * 100, 100)
         ticket_prog_lbl = (
-            f"Ticket do mês {fmt_brl_cell(ticket_real)} vs meta {fmt_brl_cell(ticket)} "
+            f"Ticket do mês {fmt_brl_cell(ticket_real)} por nota vs meta {fmt_brl_cell(ticket)} "
             f"({pct_ticket_prog:.0f}%)"
         )
     elif ticket > 0 and ticket_hist > 0:
@@ -504,11 +611,6 @@ def _render_caminho(r: dict):
         pct_ticket_prog = 0
         ticket_prog_lbl = "Defina o ticket no Início para acompanhar."
     bar_ticket = _bar_segs(pct_ticket_prog, fill="#b45309", empty="#e5e7eb")
-    oport_prog_lbl = (
-        f"Positivações no mês ({clientes_mes:,}) vs calculadas ({ocalc:,}) — {pct_oport:.0f}%"
-        if ocalc > 0
-        else f"Conversão histórica {tx_hist:.1f}% vs meta {conv:.1f}%"
-    )
 
     _section_header(
         "01",
@@ -522,47 +624,48 @@ def _render_caminho(r: dict):
             <div class="mc-head">
               <span class="colab-icon blue">◆</span> Oportunidades
             </div>
-            <div class="mc-big">{oport:,}</div>
-            <div class="mc-sub">Leads na carteira (rotas + base ativa).</div>
+            <div class="mc-big">{_n(oport)}</div>
+            <div class="mc-sub">Contatos previstos no mês com clientes da carteira (planilha de rotas).</div>
             <div class="colab-flow">
               <div class="flow-box">
-                <span class="flow-num">{oport:,}</span>
+                <span class="flow-num">{_n(oport)}</span>
                 <span class="flow-lbl">Identificadas</span>
                 <p class="flow-hint">Volume bruto de oportunidades no mês</p>
               </div>
               <div class="flow-arrow">→</div>
               <div class="flow-box hl">
-                <span class="flow-num">{ocalc:,}</span>
+                <span class="flow-num">{_n(ocalc)}</span>
                 <span class="flow-lbl">Calculadas</span>
-                <p class="flow-hint">Oport. × conversão % que você prescreveu</p>
+                <p class="flow-hint">Vendas esperadas: oportunidades × conversão meta</p>
               </div>
             </div>
             <div class="colab-bar-segs">{bar_oport}</div>
             <div class="mc-sub" style="margin-top:0.25rem;">{oport_prog_lbl}</div>
             <div class="colab-stat-row">
-              <div class="colab-stat-chip">TX conv. histórica <strong>{tx_hist:.2f}%</strong></div>
-              <div class="colab-stat-chip">Conversão meta <strong>{conv:.1f}%</strong></div>
+              <div class="colab-stat-chip">TX conv. histórica <strong>{_pct(tx_hist)}</strong></div>
+              <div class="colab-stat-chip">Conversão meta <strong>{_pct(conv)}</strong></div>
             </div>
             <div class="colab-legend">
-              <strong>Identificadas</strong> vêm do motor (histórico/rotas).
-              <strong>Calculadas</strong> = cobertura × recorrência (ex.: 30 clientes × 2 itens = 60), só na carteira ativa.
+              <strong>Calculadas</strong> = {_n(oport)} oportunidades × {_pct(conv, 0)} de conversão = {_n(ocalc)} notas esperadas.
+              A conversão histórica é notas ÷ oportunidades dos 3 últimos meses fechados.
             </div>
           </div>
           <div class="colab-metric-card">
             <div class="mc-head">
               <span class="colab-icon green">◎</span> Cobertura da carteira
             </div>
-            <div class="mc-big">{cob} / {cart}</div>
-            <div class="mc-sub">Clientes que você pretende visitar/vender na carteira de {cart}.</div>
+            <div class="mc-big">{_n(cob)} / {_n(cart)}</div>
+            <div class="mc-sub">Meta de clientes da carteira que precisam comprar no mês.</div>
             <div class="colab-bar-segs">{bar_segs}</div>
-            <div class="mc-sub">{pct_cob:.0f}% da carteira · <strong>{dif}</strong> clientes acima da meta de cobertura</div>
+            <div class="mc-sub">{cob_prog_lbl}</div>
+            <div class="mc-sub">{posit_lbl}</div>
             <div class="colab-stat-row">
-              <div class="colab-stat-chip">Cobertura média 3m <strong>{cob_media:.0f}</strong></div>
-              <div class="colab-stat-chip">TX conv. projetada <strong>{tx_proj:.0f}%</strong></div>
+              <div class="colab-stat-chip">Cobertura média 3m <strong>{_n(cob_media)}</strong></div>
+              <div class="colab-stat-chip">TX projetada <strong>{_pct(tx_proj, 0)}</strong></div>
             </div>
             <div class="colab-legend">
-              <strong>Cobertura</strong> = carteira × TX projetada. A <strong>diferença</strong> mostra folga
-              ou gap versus o tamanho da carteira.
+              <strong>Cobertura</strong> = {_n(cart)} clientes × {_pct(tx_proj, 0)} = {_n(cob)}.
+              <strong>Positivações</strong> = cobertura × recorrência meta (recompra dos mesmos clientes).
             </div>
           </div>
           <div class="colab-metric-card">
@@ -575,10 +678,10 @@ def _render_caminho(r: dict):
             <div class="mc-sub" style="margin-top:0.25rem;">{ticket_prog_lbl}</div>
             <div class="colab-stat-row">
               <div class="colab-stat-chip">Ticket histórico <strong>{fmt_brl_cell(ticket_hist)}</strong></div>
-              <div class="colab-stat-chip">Variação <strong>{pct_ticket:+.1f}%</strong></div>
+              <div class="colab-stat-chip">Variação <strong>{_pct(pct_ticket, 1, sinal=True)}</strong></div>
             </div>
             <div class="colab-stat-row">
-              <div class="colab-stat-chip">Diferença R$ <strong>{fmt_brl_cell(dif_ticket)}</strong></div>
+              <div class="colab-stat-chip">Diferença <strong>{fmt_brl_cell(dif_ticket)}</strong></div>
             </div>
             <div class="colab-legend">
               Compare o ticket <strong>prescrito</strong> com o <strong>histórico 3 meses</strong> para ver se a meta é agressiva ou conservadora.
@@ -590,13 +693,13 @@ def _render_caminho(r: dict):
     )
 
 
-def _render_historico(r: dict):
+def _render_historico(r: dict, mes_atual: dict):
     fat = _f(r, "faturamento_media_3m") or _f(r, "fat_media_3m")
     pos = _f(r, "positivacao_media_3m")
     tx_cob = _f(r, "cobertura_hist_pct")
     rec = _f(r, "recorrencia_media")
-    rec_meta = _f(r, "recorrencia_meta")
-    real = _f(r, "realizado_mes")
+    rec_meta = valor_efetivo(r, "recorrencia_meta")
+    real = float(mes_atual.get("faturamento") or 0)
     _section_header(
         "02",
         "Sua base histórica",
@@ -610,21 +713,21 @@ def _render_historico(r: dict):
             <span class="lbl">MÉDIA 3M</span>
           </div>
           <div class="colab-hist-card">
-            <div><div class="lbl">Positivação média</div><div class="val">{pos:,.0f}</div></div>
-            <span class="lbl">HISTÓRICO</span>
+            <div><div class="lbl">Positivação média</div><div class="val">{_n(pos)}</div></div>
+            <span class="lbl">NOTAS / MÊS</span>
           </div>
           <div class="colab-hist-card">
-            <div><div class="lbl">TX cobertura (média)</div><div class="val">{tx_cob:.1f}%</div></div>
+            <div><div class="lbl">TX cobertura (média)</div><div class="val">{_pct(tx_cob)}</div></div>
             <span class="lbl">HISTÓRICO</span>
           </div>
         </div>
         <div class="colab-hist-row" style="margin-top:0.75rem;">
           <div class="colab-hist-card">
-            <div><div class="lbl">Recorrência média</div><div class="val">{rec:.1f}</div></div>
-            <span class="lbl">itens ÷ clientes (carteira)</span>
+            <div><div class="lbl">Recorrência média</div><div class="val">{_dec(rec)}</div></div>
+            <span class="lbl">notas ÷ clientes</span>
           </div>
           <div class="colab-hist-card">
-            <div><div class="lbl">Recorrência meta</div><div class="val">{rec_meta:.1f}</div></div>
+            <div><div class="lbl">Recorrência meta</div><div class="val">{_dec(rec_meta)}</div></div>
             <span class="lbl">PRESCRITO</span>
           </div>
           <div class="colab-hist-card">
@@ -641,7 +744,6 @@ def render_aba_colaboradores(ano: int, mes: int, taxa: float) -> None:
     from app.main import APP_VERSION
 
     st.markdown(_COLAB_CSS, unsafe_allow_html=True)
-    st.caption(f"Layout colaboradores · **v{APP_VERSION}**")
     st.markdown(
         f"""
         <div class="colab-page">
@@ -652,10 +754,9 @@ def render_aba_colaboradores(ano: int, mes: int, taxa: float) -> None:
         unsafe_allow_html=True,
     )
 
-    ini, fim = month_bounds(ano, mes)
-    ranking = load_ranking_periodo(ini, fim, 120)
+    ranking = load_equipe_mes(ano, mes, 120)
     if ranking.empty:
-        st.info("Sem faturamento no mês para listar colaboradores.")
+        st.info("Sem faturamento recente para listar colaboradores.")
         return
 
     opcoes = [f"{int(r.vendedor):03d} — {r.nome}" for r in ranking.itertuples()]
@@ -667,20 +768,17 @@ def render_aba_colaboradores(ano: int, mes: int, taxa: float) -> None:
         st.warning("Colaborador sem linha na tabela de metas (sem movimento no mês?).")
         return
 
-    prem = get_premissa(vid, ano, mes)
-    if vendedor_tem_premissa(vid, ano, mes) and not premissa_tem_prescricao(prem):
-        st.warning(
-            "Há registro salvo, mas sem valores prescritos — salve a tabela no **Início**."
-        )
-
     meta_calc = float(r.get("meta_formula") or 0)
     meta_man = float(r.get("meta_manual") or 0)
-    default_modo = "Manual" if meta_man > 0 else "Calculada"
+    meta_prop = float(r.get("meta_plano_rs") or r.get("meta_prop_mes_rs") or 0)
+    if meta_prop > 0:
+        default_modo = "Plano"
+    else:
+        default_modo = "Manual" if meta_man > 0 else "Calculada"
     toggle_key = f"colab_ritmo_{ano}_{mes}_{vid}"
     cob_meta = int(_f(r, "cobertura_meta_clientes"))
 
     view = render_pacing_controls(ano, mes, "colab")
-    meta_prop = float(r.get("meta_prop_mes_rs") or 0)
     cob_prop = r.get("cob_prop_sug")
     _render_hero_v2(
         meta_calc,
@@ -693,8 +791,9 @@ def render_aba_colaboradores(ano: int, mes: int, taxa: float) -> None:
         cob_meta,
         cob_prop=int(cob_prop) if cob_prop is not None else None,
     )
-    _render_caminho(r)
-    _render_historico(r)
+    mes_atual = load_realizado_mes(vid, ano, mes)
+    _render_caminho(r, mes_atual)
+    _render_historico(r, mes_atual)
 
     st.caption(
         "Dados da tabela salva no Início (ou ERP se ainda não salvou). "

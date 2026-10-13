@@ -60,7 +60,11 @@ def premissas_file_token() -> int:
     return int(_PREMISSAS_PATH.stat().st_mtime)
 
 
+_local_cache: tuple[float, dict] | None = None
+
+
 def _load_all() -> dict:
+    global _local_cache
     from app.neon_store import kv_get, migrate_json_file_to_neon, neon_enabled
 
     if neon_enabled():
@@ -68,10 +72,13 @@ def _load_all() -> dict:
         return kv_get(_NEON_KEY)
     if not _PREMISSAS_PATH.exists():
         return {}
-    try:
-        return json.loads(_PREMISSAS_PATH.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return {}
+    mtime = _PREMISSAS_PATH.stat().st_mtime
+    if _local_cache is None or _local_cache[0] != mtime:
+        try:
+            _local_cache = (mtime, json.loads(_PREMISSAS_PATH.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            return {}
+    return json.loads(json.dumps(_local_cache[1]))
 
 
 def _save_all(data: dict) -> None:
@@ -101,12 +108,36 @@ def save_premissa(vendedor_id: int, ano: int, mes: int, premissa: PremissaVended
     _save_all(data)
 
 
+def save_premissas_lote(ano: int, mes: int, premissas: dict[int, PremissaVendedor]) -> None:
+    """Grava várias premissas com uma leitura e uma escrita."""
+    data = _load_all()
+    for vid, prem in premissas.items():
+        data[_storage_key(int(vid), ano, mes)] = asdict(prem)
+    _save_all(data)
+
+
+def _meta_anual_do_ano(data: dict, ano: int) -> float:
+    """A meta anual vale para o ano todo, em qualquer mês em que tenha sido salva."""
+    for m in range(12, 0, -1):
+        raw = data.get(_empresa_key(ano, m)) or {}
+        v = float(raw.get("meta_empresa_anual_rs") or 0)
+        if v > 0:
+            return v
+    return 0.0
+
+
 def get_premissa_empresa(ano: int, mes: int) -> PremissaEmpresa:
-    raw = _load_all().get(_empresa_key(ano, mes))
-    if not raw:
-        return PremissaEmpresa()
+    data = _load_all()
+    raw = data.get(_empresa_key(ano, mes))
     allowed = {f.name for f in PremissaEmpresa.__dataclass_fields__.values()}
-    return PremissaEmpresa(**{k: v for k, v in raw.items() if k in allowed})
+    emp = (
+        PremissaEmpresa(**{k: v for k, v in raw.items() if k in allowed})
+        if raw
+        else PremissaEmpresa()
+    )
+    if emp.meta_empresa_anual_rs <= 0:
+        emp.meta_empresa_anual_rs = _meta_anual_do_ano(data, ano)
+    return emp
 
 
 def save_premissa_empresa(ano: int, mes: int, premissa: PremissaEmpresa) -> None:

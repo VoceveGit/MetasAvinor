@@ -29,11 +29,15 @@ from app.equipe_grid_logic import (
     recalc_row_formulas_only,
 )
 from app.grid_snapshot import load_grid_snapshot
-from app.dates_util import month_bounds
+from app.dates_util import (
+    business_days_between,
+    month_bounds,
+)
 from app.formatting import fmt_brl_cell, fmt_pct_table
-from app.meta_proporcional import aplicar_colunas_proporcionais, meta_empresa_mensal_ref
+from app.meta_proporcional import aplicar_colunas_proporcionais
 from app.meta_resolve import resolve_meta_mes_cob
-from app.premissas import get_premissa, get_premissa_empresa, vendedor_tem_premissa
+from app.plano_metas import COMP_DESLIGADA, COMP_MODOS, compensacao_mes, mes_fechado, meta_empresa_mes
+from app.premissas import get_premissa, vendedor_tem_premissa
 from app.table_display import show_data_table
 from datetime import date
 
@@ -186,6 +190,40 @@ _RANK_CSS = """
 .rv-top-list li { margin-bottom: 0.28rem; line-height: 1.3; }
 .rv-top-list .rv-top-val { font-weight: 700; color: #1a4d3e; }
 .rv-top-empty { font-size: 0.78rem; color: #9ca3af; }
+.rank-vend-card { border-left: 5px solid #cbd5d0; }
+.rank-vend-card.st-ok { border-left-color: #2f9e63; }
+.rank-vend-card.st-atencao { border-left-color: #e0a800; }
+.rank-vend-card.st-critico { border-left-color: #d64545; }
+.rv-status { display:flex; flex-direction:column; align-items:flex-end; gap:.2rem; }
+.rv-pill { font-size:.72rem; font-weight:800; padding:.2rem .55rem; border-radius:999px; white-space:nowrap; }
+.rv-pill.ok { background:#e3f5ea; color:#1f7a4d; }
+.rv-pill.atencao { background:#fff4d6; color:#8a6100; }
+.rv-pill.critico { background:#fde8e8; color:#b42318; }
+.rv-pill.sem { background:#eef1ef; color:#5b6b63; }
+.rv-proj { font-size:.74rem; color:#4b5563; white-space:nowrap; }
+.rv-proj strong { color:#12261d; }
+.rv-ring-leg { font-size:.66rem; color:#8a958f; margin-top:.15rem; line-height:1.25; }
+.rv-dia { display:flex; justify-content:space-between; align-items:center; gap:.5rem; flex-wrap:wrap;
+  background:#f3f7f4; border:1px solid #e1ebe4; border-radius:10px; padding:.45rem .7rem; font-size:.82rem; color:#33433b; }
+.rv-dia strong { color:#12261d; font-size:.95rem; }
+.rank-vend-card details.rv-tops-box { margin-top:.6rem; }
+.rank-vend-card details.rv-tops-box summary { cursor:pointer; font-size:.78rem; font-weight:700; color:#2f6b55; list-style:none; }
+.rank-vend-card details.rv-tops-box summary::-webkit-details-marker { display:none; }
+.rank-vend-card details.rv-tops-box summary::before { content:"▸ "; }
+.rank-vend-card details.rv-tops-box[open] summary::before { content:"▾ "; }
+.rank-vend-card details.rv-tops-box .rv-tops { margin-top:.45rem; }
+.rank-counters { display:flex; flex-wrap:wrap; gap:.5rem; margin:.25rem 0 .9rem; }
+.rank-counters span { font-size:.84rem; font-weight:700; padding:.3rem .75rem; border-radius:999px; }
+.rank-counters .ok { background:#e3f5ea; color:#1f7a4d; }
+.rank-counters .atencao { background:#fff4d6; color:#8a6100; }
+.rank-counters .critico { background:#fde8e8; color:#b42318; }
+.rank-counters .sem { background:#eef1ef; color:#5b6b63; }
+.st-key-rank_status div > button { font-weight:800 !important; font-size:.9rem !important; border-radius:999px !important; }
+.st-key-rank_status div > button[aria-checked="true"] { box-shadow: 0 0 0 2px currentColor inset !important; }
+.st-key-rank_filtros { background:#fff; border:1px solid #dfe7e2; border-radius:16px; padding:.9rem 1rem .6rem; margin-bottom:1rem; }
+.st-key-rank_filtros [data-testid="stButtonGroup"] div:has(> button) { flex-wrap: wrap; row-gap: .3rem; }
+.rf-title { font-size:.74rem; font-weight:800; text-transform:uppercase; letter-spacing:.07em; color:#2f6b55;
+  margin:0 0 .35rem; padding-bottom:.3rem; border-bottom:1px solid #e6ede8; }
 </style>
 """
 
@@ -249,24 +287,66 @@ def _vend_card_html(c: dict, meta_emp: float) -> str:
         )
     else:
         ticket_detail = "Ticket não prescrito no Início."
-    tops = (
-        _top_col_html("Top clientes", c.get("top_clientes") or [])
-        + _top_col_html("Top produtos", c.get("top_produtos") or [])
-        + _top_col_html("Top cidades", c.get("top_cidades") or [])
-    )
-    return f"""<div class="rank-vend-card{warn}">
+    tops_html = ""
+    if c.get("top_clientes") or c.get("top_produtos") or c.get("top_cidades"):
+        tops = (
+            _top_col_html("Top clientes", c.get("top_clientes") or [])
+            + _top_col_html("Top produtos", c.get("top_produtos") or [])
+            + _top_col_html("Top cidades", c.get("top_cidades") or [])
+        )
+        primeiro = (c.get("top_clientes") or [("", "")])[0][0]
+        resumo = f" · 1º cliente: {html.escape(primeiro)}" if primeiro else ""
+        tops_html = (
+            f'<details class="rv-tops-box"><summary>Tops do período{resumo}</summary>'
+            f'<div class="rv-tops">{tops}</div></details>'
+        )
+    st_key = c.get("status", "sem")
+    proj_pct = c.get("proj_pct")
+    encerrado = bool(c.get("encerrado"))
+    if proj_pct is None:
+        proj_html = ""
+    elif encerrado:
+        proj_html = (
+            f'<span class="rv-proj" title="Período encerrado: vale o realizado.">'
+            f'Fechou em <strong>{proj_pct:.0f}%</strong> da meta</span>'
+        )
+    else:
+        proj_html = (
+            f'<span class="rv-proj" title="Realizado do período ÷ dias úteis passados × dias úteis do período">'
+            f'Projeção <strong>{html.escape(fmt_brl_cell(c.get("proj", 0)))}</strong> ({proj_pct:.0f}%)</span>'
+        )
+    falta_p = c.get("falta_mes", 0)
+    if proj_pct is None:
+        dia_html = ""
+    elif falta_p <= 0:
+        dia_html = '<div class="rv-dia"><span>✓ Meta do período batida</span></div>'
+    elif encerrado:
+        dia_html = (
+            f'<div class="rv-dia"><span>Período encerrado</span>'
+            f'<span>faltaram <strong>{html.escape(fmt_brl_cell(falta_p))}</strong></span></div>'
+        )
+    else:
+        dia_html = (
+            f'<div class="rv-dia"><span>Precisa por dia útil</span>'
+            f'<span><strong>{html.escape(fmt_brl_cell(c["precisa_dia"]))}</strong> · '
+            f'{c["du_rest"]} dia(s) útil(eis) restante(s)</span></div>'
+        )
+    tipo = str(c["meta_tipo"]).replace("plano", "").strip()
+    meta_lbl = "Meta" + (f" ({tipo})" if tipo else "") + (" · acum." if c.get("acumulado") else "")
+    return f"""<div class="rank-vend-card{warn} st-{st_key}">
 <div class="rv-head">
-<div><div class="rv-name">{nome}</div><div class="rv-cod">Cód. {c['vendedor']:03d}</div></div>
-<span class="rv-part">{html.escape(part_label)}</span>
+<div><div class="rv-name">{nome}</div><div class="rv-cod">Cód. {c['vendedor']:03d} · {html.escape(part_label)}</div></div>
+<div class="rv-status"><span class="rv-pill {st_key}">● {_STATUS_TXT.get(st_key, "")}</span>{proj_html}</div>
 </div>
 <div class="rv-meta-line">Realizado <strong>{html.escape(fmt_brl_cell(real))}</strong>
-· Meta ({html.escape(str(c['meta_tipo']) + (" · acum." if c.get("acumulado") else ""))}) <strong>{html.escape(fmt_brl_cell(meta) if meta > 0 else "—")}</strong></div>
+· {html.escape(meta_lbl)} <strong>{html.escape(fmt_brl_cell(meta) if meta > 0 else "—")}</strong></div>
 <div class="rv-rings">
 <div class="rv-ring-wrap">
 <div class="rv-ring" style="{_mini_ring(pct_fat)}">
 <div class="rv-ring-inner"><span>{pct_fat:.0f}%</span><span class="sub">meta R$</span></div>
 </div>
 <div class="rv-ring-lbl">Faturamento</div>
+<div class="rv-ring-leg">quanto da meta em R$ já vendeu</div>
 <div class="rv-ring-detail">Falta <strong>{html.escape(fmt_brl_cell(c['falta']) if meta > 0 else "—")}</strong></div>
 {ajuste_html}
 </div>
@@ -275,6 +355,7 @@ def _vend_card_html(c: dict, meta_emp: float) -> str:
 <div class="rv-ring-inner"><span>{pct_ticket:.0f}%</span><span class="sub">ticket</span></div>
 </div>
 <div class="rv-ring-lbl">Ticket médio</div>
+<div class="rv-ring-leg">valor médio por nota vs meta</div>
 <div class="rv-ring-detail">{ticket_detail}</div>
 </div>
 <div class="rv-ring-wrap">
@@ -282,11 +363,11 @@ def _vend_card_html(c: dict, meta_emp: float) -> str:
 <div class="rv-ring-inner"><span>{pct_cob:.0f}%</span><span class="sub">carteira</span></div>
 </div>
 <div class="rv-ring-lbl">Cobertura</div>
+<div class="rv-ring-leg">clientes que compraram vs meta</div>
 <div class="rv-ring-detail">{cob_txt}</div>
 </div>
 </div>
-<div class="rv-tops">{tops}</div>
-</div>"""
+{dia_html}{tops_html}</div>"""
 
 
 def _pct_ating(real: float, meta: float) -> float | None:
@@ -367,15 +448,18 @@ def _collect_vendedor_cards(
     meta_ref: str,
     acumulado: bool,
     include_tops: bool = False,
+    comp_modo: str = COMP_DESLIGADA,
 ) -> list[dict]:
     m_ini, m_fim = month_bounds(ano, mes)
+    comp_vend: dict[int, float] = {}
+    if comp_modo != COMP_DESLIGADA and not mes_fechado(ano, mes):
+        comp_vend = compensacao_mes(ano, mes, comp_modo).por_vendedor
     p_ini, p_fim = view.ini, view.fim_exclusive
     rank = load_ranking_periodo(m_ini, m_fim, 120)
     if rank.empty:
         return []
 
-    emp = get_premissa_empresa(ano, mes)
-    meta_emp = meta_empresa_mensal_ref(emp)
+    meta_emp = meta_empresa_mes(ano, mes)
     vids_pre = [int(r.vendedor) for r in rank.itertuples()]
     ids_t = tuple(vids_pre)
     metrics_cache: dict = {}
@@ -406,7 +490,7 @@ def _collect_vendedor_cards(
                 base_rows.append(gr)
     grid_by_vid: dict[int, dict] = {}
     if base_rows:
-        for row in aplicar_colunas_proporcionais(base_rows, ano, mes, emp):
+        for row in aplicar_colunas_proporcionais(base_rows, ano, mes):
             vid = int(row["vendedor"])
             if vid in vids_set:
                 grid_by_vid[vid] = row
@@ -441,6 +525,10 @@ def _collect_vendedor_cards(
                 clientes_mes=clientes_mes,
             )
             meta_tipo = "salva"
+        comp = float(comp_vend.get(vid, 0.0))
+        if comp and meta_mes > 0:
+            meta_mes = max(meta_mes + comp, 0.0)
+            meta_tipo += f" {'+' if comp > 0 else '−'}{fmt_brl_cell(abs(comp))} comp."
 
         modo_pacing = (
             "Real"
@@ -465,7 +553,10 @@ def _collect_vendedor_cards(
             get_premissa(vid, ano, mes)
         )
 
-        ticket_meta = float(row.get("ticket_meta") or 0)
+        r_ini = m_ini if acumulado and view.lente in ("Semanal", "Diário") else p_ini
+        ritmo = ritmo_periodo(real, meta_uso, r_ini, p_fim)
+
+        ticket_meta = float(row.get("ticket_meta") or 0) or float(row.get("ticket_sugerido") or 0)
         t_ini, t_fim, t_lbl = _ticket_realizado_interval(
             view, acumulado and view.lente in ("Semanal", "Diário"), m_ini, m_fim
         )
@@ -510,54 +601,118 @@ def _collect_vendedor_cards(
                 "top_produtos": top_produtos,
                 "top_cidades": top_cidades,
                 "tem_premissa": tem_prem,
+                **ritmo,
             }
         )
     cards.sort(key=lambda c: c["realizado"], reverse=True)
     return cards
 
 
+_STATUS_ORDEM = {"critico": 0, "atencao": 1, "ok": 2, "sem": 3}
+_STATUS_TXT = {"ok": "No ritmo", "atencao": "Atenção", "critico": "Crítico", "sem": "Sem meta"}
+_PILL_CSS = {
+    "ok": "background:#e3f5ea !important;color:#1f7a4d !important;border-color:#b9e2c8 !important;",
+    "atencao": "background:#fff4d6 !important;color:#8a6100 !important;border-color:#f0d998 !important;",
+    "critico": "background:#fde8e8 !important;color:#b42318 !important;border-color:#f5c2bd !important;",
+    "sem": "background:#eef1ef !important;color:#5b6b63 !important;border-color:#d5ddd8 !important;",
+}
+
+
+def ritmo_periodo(real: float, meta: float, ini: date, fim_exclusive: date) -> dict:
+    """Projeção de fechamento do período (realizado ÷ dias úteis passados × dias úteis do período).
+
+    Período já encerrado: a projeção é o próprio realizado. Semáforo sobre a projeção:
+    verde ≥ 100% da meta, amarelo 85–100%, vermelho < 85%.
+    """
+    hoje = date.today()
+    du_tot = max(business_days_between(ini, fim_exclusive), 1)
+    encerrado = hoje >= fim_exclusive
+    falta = max(meta - real, 0.0)
+    base = {"encerrado": encerrado, "falta_mes": falta}
+    if meta <= 0 or hoje < ini:
+        return {**base, "status": "sem", "proj": 0.0, "proj_pct": None, "du_rest": 0, "precisa_dia": 0.0}
+    if encerrado:
+        du_pass, du_rest = du_tot, 0
+    else:
+        du_pass = business_days_between(ini, hoje) or 1
+        du_rest = max(business_days_between(hoje, fim_exclusive), 1)
+    proj = real if encerrado else real / du_pass * du_tot
+    proj_pct = proj / meta * 100
+    status = "ok" if proj_pct >= 100 else ("atencao" if proj_pct >= 85 else "critico")
+    return {
+        **base,
+        "status": status,
+        "proj": proj,
+        "proj_pct": proj_pct,
+        "du_rest": du_rest,
+        "precisa_dia": falta / du_rest if du_rest > 0 else 0.0,
+    }
+
+
+def ritmo_mes(real_mes: float, meta_mes: float, ano: int, mes: int) -> dict:
+    return ritmo_periodo(real_mes, meta_mes, *month_bounds(ano, mes))
+
+
 def render_painel_equipe_mes(ano: int, mes: int, taxa: float) -> pd.DataFrame:
     """Painel único: meta empresa + cards por colaborador."""
     st.markdown(_RANK_CSS, unsafe_allow_html=True)
-    view = render_pacing_controls(ano, mes, "rank")
-    st.caption(
-        "**Meta:** de onde vem o valor do mês (azul = prescrito · amarelo = proporcional empresa). "
-        "**Acumulado:** só em semana/dia — meta e realizado do dia 1 até o fim do período."
-    )
-    c_meta, c_acum = st.columns([2, 1])
-    with c_meta:
-        meta_ref = st.segmented_control(
-            "Origem da meta nos cards",
-            ["Manual", "Calculada", "Proporcional"],
-            default="Manual",
-            key=f"rank_meta_ref_{ano}_{mes}",
-        )
-    with c_acum:
-        acumulado = st.checkbox(
-            "Acumulado do mês",
-            value=False,
-            disabled=view.lente == "Mensal",
-            key=f"rank_acum_{ano}_{mes}",
-            help="Desligado = só a semana/dia. Ligado = meta e realizado acumulados (ex.: sem 2 → 2× fatia).",
-        )
-    meta_ref = meta_ref or "Manual"
-    include_tops = st.checkbox(
-        "Mostrar tops (clientes, produtos, cidades) nos cards",
-        value=False,
-        key=f"rank_tops_{ano}_{mes}",
-        help="Desligado por padrão para carregar o painel mais rápido.",
-    )
+    with st.container(key="rank_filtros"):
+        c_per, c_meta, c_exib = st.columns([1.3, 1, 1], gap="large")
+        with c_per:
+            st.markdown('<div class="rf-title">📅 Período</div>', unsafe_allow_html=True)
+            view = render_pacing_controls(ano, mes, "rank", always_calendar=True)
+        with c_meta:
+            st.markdown('<div class="rf-title">🎯 Meta</div>', unsafe_allow_html=True)
+            st.caption(
+                "Meta do mês salva no Início: a manual, se houver; senão a automática. "
+                "Campos azuis vazios usam a sugestão."
+            )
+            meta_ref = "Plano"
+            comp_modo = st.segmented_control(
+                "Compensação",
+                COMP_MODOS,
+                default=COMP_DESLIGADA,
+                key=f"rank_comp_{ano}_{mes}",
+                help=(
+                    "Soma à meta do mês o saldo dos meses fechados (só visão).\n\n"
+                    "Individual: cada um carrega o que ficou devendo ou vendeu a mais.\n\n"
+                    "Geral: o saldo da equipe é dividido pelo peso de cada um."
+                ),
+                disabled=mes_fechado(ano, mes),
+            ) or COMP_DESLIGADA
+        with c_exib:
+            st.markdown('<div class="rf-title">👁 Exibição</div>', unsafe_allow_html=True)
+            ordem = st.selectbox(
+                "Ordenar por",
+                ["Mais em risco primeiro", "Maior faturamento", "Maior % da meta"],
+                key=f"rank_ordem_{ano}_{mes}",
+            )
+            acumulado = st.toggle(
+                "Acumulado do mês",
+                value=False,
+                disabled=view.lente == "Mensal",
+                key=f"rank_acum_{ano}_{mes}",
+                help="Só em semana/dia. Ligado = meta e realizado do dia 1 até o fim do período.",
+            )
+            include_tops = st.toggle(
+                "Tops nos cards",
+                value=False,
+                key=f"rank_tops_{ano}_{mes}",
+                help="Top clientes, produtos e cidades (recolhidos). Desligado carrega mais rápido.",
+            )
     cards = _collect_vendedor_cards(
-        ano, mes, taxa, view, meta_ref, acumulado, include_tops=include_tops
+        ano, mes, taxa, view, meta_ref, acumulado, include_tops=include_tops, comp_modo=comp_modo
     )
     if not cards:
         st.info("Sem faturamento no mês para montar o painel.")
         return pd.DataFrame()
+    if ordem == "Mais em risco primeiro":
+        cards.sort(key=lambda c: (_STATUS_ORDEM.get(c["status"], 9), c["proj_pct"] or 0))
+    elif ordem == "Maior % da meta":
+        cards.sort(key=lambda c: c["ating"], reverse=True)
 
-    emp = get_premissa_empresa(ano, mes)
-    meta_emp = meta_empresa_mensal_ref(emp)
+    meta_emp = meta_empresa_mes(ano, mes)
     total_real = sum(c["realizado"] for c in cards)
-    total_meta = sum(c["meta_uso"] for c in cards if c["meta_uso"] > 0)
     vids = [int(c["vendedor"]) for c in cards]
     modo_emp = (
         "Real"
@@ -588,10 +743,6 @@ def render_painel_equipe_mes(ano: int, mes: int, taxa: float) -> pd.DataFrame:
                 <span>Falta para meta empresa</span>
                 <strong>{fmt_brl_cell(falta_emp) if meta_emp > 0 else "—"}</strong>
               </div>
-              <div class="re-metric">
-                <span>Soma metas nos cards (filtro atual)</span>
-                <strong>{fmt_brl_cell(total_meta) if total_meta > 0 else "—"}</strong>
-              </div>
             </div>
           </div>
           <div class="rank-ring" style="{pct_emp_style}">
@@ -614,6 +765,26 @@ def render_painel_equipe_mes(ano: int, mes: int, taxa: float) -> pd.DataFrame:
         f"{n_prem} com premissas salvas</p>",
         unsafe_allow_html=True,
     )
+    cont = {k: sum(1 for c in cards if c["status"] == k) for k in _STATUS_ORDEM}
+    rotulos = {"ok": "no ritmo", "atencao": "atenção", "critico": "críticos", "sem": "sem meta"}
+    opcoes = [k for k in ("ok", "atencao", "critico", "sem") if k != "sem" or cont["sem"]]
+    with st.container(key="rank_status"):
+        sel = st.pills(
+            "Status",
+            opcoes,
+            format_func=lambda k: f"● {cont[k]} {rotulos[k]}",
+            key=f"rank_status_{ano}_{mes}",
+            label_visibility="collapsed",
+            help="Clique para trazer esse grupo para o topo; clique de novo para desfazer. "
+            "Projeção do período: verde ≥ 100% da meta, amarelo 85–100%, vermelho < 85%.",
+        )
+    css = "".join(
+        f".st-key-rank_status div > button:nth-of-type({i + 1}){{{_PILL_CSS[k]}}}"
+        for i, k in enumerate(opcoes)
+    )
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+    if sel:
+        cards.sort(key=lambda c: c["status"] != sel)
 
     for i in range(0, len(cards), 2):
         col_a, col_b = st.columns(2, gap="medium")

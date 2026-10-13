@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from app.data import load_faturamento_vendedores_janela
 from app.dates_util import business_days_in_month, three_months_prior_bounds
-from app.pacing import weeks_in_month
 from app.premissas import PremissaEmpresa
 
 
 def meta_empresa_mensal_ref(emp: PremissaEmpresa) -> float:
-    """Mensal de referência: meta anual ÷ 12, senão meta mensal salva."""
+    """Legado (sem mês): anual ÷ 12, senão meta mensal salva. Prefira ``plano_metas.meta_empresa_mes``."""
     anual = float(emp.meta_empresa_anual_rs or 0)
     if anual > 0:
         return anual / 12.0
@@ -56,24 +55,29 @@ def aplicar_colunas_proporcionais(
     rows: list[dict],
     ano: int,
     mes: int,
-    emp: PremissaEmpresa,
+    emp: PremissaEmpresa | None = None,
 ) -> list[dict]:
-    """Preenche peso %, meta proporcional do mês e positivação sugerida (somente leitura)."""
-    meta_mes = meta_empresa_mensal_ref(emp)
-    vids = [int(r["vendedor"]) for r in rows]
-    pesos = pesos_faturamento_3m(ano, mes, vids)
-    n_weeks = max(len(weeks_in_month(ano, mes)), 1)
+    """Colunas amarelas: peso, meta automática do plano anual, ajuste e meta do mês."""
+    from app.plano_metas import metas_colaboradores_mes
+
+    del emp
+    metas = metas_colaboradores_mes(ano, mes)
     n_uteis = max(business_days_in_month(ano, mes), 1)
     out: list[dict] = []
     for row in rows:
         r = dict(row)
         vid = int(r["vendedor"])
-        peso = pesos.get(vid, 0.0)
+        mc = metas.get(vid)
+        peso = mc.peso if mc else 0.0
+        meta_prop = mc.auto if mc else 0.0
         r["peso_fat_3m_pct"] = round(peso * 100.0, 2)
-        meta_prop = meta_mes * peso if meta_mes > 0 else 0.0
         r["meta_prop_mes_rs"] = round(meta_prop, 0)
-        r["meta_prop_sem_rs"] = round(meta_prop / n_weeks, 0) if meta_prop > 0 else 0
+        r["meta_plano_rs"] = round(mc.final, 0) if mc else 0.0
+        r["ajuste_plano_pct"] = round(mc.pct * 100.0, 2) if mc else 0.0
+        r["ajuste_origem"] = mc.origem if mc else "auto"
+        r["ajuste_mes_origem"] = mc.mes_origem if mc else None
         r["meta_prop_dia_rs"] = round(meta_prop / n_uteis, 0) if meta_prop > 0 else 0
+        r["meta_prop_sem_rs"] = round(meta_prop / n_uteis * 5, 0) if meta_prop > 0 else 0
         ticket = float(r.get("ticket_historico") or 0)
         r["cob_prop_sug"] = _cobertura_sugerida_prop(r, meta_prop)
         rec_meta = float(r.get("recorrencia_meta") or 0)
@@ -91,7 +95,4 @@ def aplicar_colunas_proporcionais(
 
 
 def enrich_row_proporcional(row: dict, ano: int, mes: int, emp: PremissaEmpresa | None = None) -> dict:
-    from app.premissas import get_premissa_empresa
-
-    emp = emp or get_premissa_empresa(ano, mes)
     return aplicar_colunas_proporcionais([row], ano, mes, emp)[0]

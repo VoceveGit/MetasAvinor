@@ -1,5 +1,8 @@
 """Somente leitura no MySQL EXTRACTOR."""
 
+import threading
+import time
+
 import pandas as pd
 import mysql.connector
 from mysql.connector import Error
@@ -25,12 +28,62 @@ def get_connection():
         password=cfg.password,
         database=cfg.database,
         connection_timeout=30,
+        autocommit=True,
     )
 
 
-def read_sql(query: str, params: tuple | None = None) -> pd.DataFrame:
-    conn = get_connection()
+_POOL_MAX = 4
+_POOL_IDLE_S = 60.0
+_POOL: list[tuple[float, object]] = []
+_POOL_LOCK = threading.Lock()
+
+
+def _acquire():
+    agora = time.monotonic()
+    while True:
+        with _POOL_LOCK:
+            item = _POOL.pop() if _POOL else None
+        if item is None:
+            return get_connection()
+        ts, conn = item
+        if agora - ts <= _POOL_IDLE_S:
+            try:
+                if conn.is_connected():
+                    return conn
+            except Error:
+                pass
+        _close(conn)
+
+
+def _release(conn) -> None:
+    with _POOL_LOCK:
+        if len(_POOL) < _POOL_MAX:
+            _POOL.append((time.monotonic(), conn))
+            return
+    _close(conn)
+
+
+def _close(conn) -> None:
     try:
-        return pd.read_sql(query, conn, params=params)
-    finally:
         conn.close()
+    except Exception:
+        pass
+
+
+def read_sql(query: str, params: tuple | None = None) -> pd.DataFrame:
+    conn = _acquire()
+    try:
+        df = pd.read_sql(query, conn, params=params)
+    except (Error, pd.errors.DatabaseError):
+        _close(conn)
+        conn = get_connection()
+        try:
+            df = pd.read_sql(query, conn, params=params)
+        except Exception:
+            _close(conn)
+            raise
+    except Exception:
+        _close(conn)
+        raise
+    _release(conn)
+    return df

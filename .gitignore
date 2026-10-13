@@ -5,6 +5,7 @@ __pycache__/
 .streamlit/secrets.toml
 premissas_local.json
 grid_snapshot_local.json
+plano_metas_local.json
 audios_tmp/
 *.wav
 *.xlsx

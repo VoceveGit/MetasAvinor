@@ -95,7 +95,7 @@ def _tabela_frigosol(
         [
             row("Cobertura (clientes)", meta_cob, real_cob, lambda x: f"{x:.0f}"),
             row("Recorrência", meta_rec, real_rec, lambda x: f"{x:.2f}"),
-            row("Positivação (clientes)", meta_pos, real_pos, lambda x: f"{x:.0f}"),
+            row("Positivação (notas)", meta_pos, real_pos, lambda x: f"{x:.0f}"),
             row("Faturamento (R$)", meta_fat, real_fat, fmt_brl_cell),
         ]
     )
@@ -370,8 +370,8 @@ def render_planejamento_colaborador(
                 float(real_mes["clientes"]),
                 meta_rec,
                 real_rec,
-                bloco.oport_calc_positivacao,
-                float(real_mes["clientes"]),
+                bloco.positivacoes_meta,
+                float(real_mes["notas"]),
                 meta_fat_final,
                 float(real_mes["faturamento"]),
             ),

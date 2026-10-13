@@ -13,6 +13,7 @@ class BlocoFrigosol:
     tx_conv_oport_hist: float
     conversao_meta: float
     oport_calc_positivacao: float
+    positivacoes_meta: float
     cobertura_media_3m: float
     cobertura_meta: float
     diff_carteira_cobertura: float
@@ -101,12 +102,8 @@ def montar_bloco_frigosol(
     ticket_meta = prem.ticket_meta if prem.ticket_meta > 0 else ticket_hist
     rec_meta = prem.meta_recorrencia if prem.meta_recorrencia > 0 else rec_hist
 
-    if cob_meta > 0 and rec_meta > 0:
-        oport_calc_pos = float(cob_meta) * float(rec_meta)
-    elif conv_meta_frac > 0 and oport > 0:
-        oport_calc_pos = oport * conv_meta_frac
-    else:
-        oport_calc_pos = 0.0
+    oport_calc_pos = oport * conv_meta_frac if conv_meta_frac > 0 and oport > 0 else 0.0
+    posit_meta = float(cob_meta) * float(rec_meta) if cob_meta > 0 and rec_meta > 0 else 0.0
     if prem.ticket_meta > 0 and prem.meta_recorrencia > 0 and cob_meta > 0:
         meta_formula = prem.ticket_meta * prem.meta_recorrencia * cob_meta
     else:
@@ -124,6 +121,7 @@ def montar_bloco_frigosol(
         tx_conv_oport_hist=tx_hist,
         conversao_meta=conv_meta_frac,
         oport_calc_positivacao=oport_calc_pos,
+        positivacoes_meta=posit_meta,
         cobertura_media_3m=cob_media,
         cobertura_meta=cob_meta,
         diff_carteira_cobertura=diff_cart,

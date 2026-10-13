@@ -209,12 +209,12 @@ def avaliar_preparacao_mes(ano: int, mes: int) -> list[ReadinessCheck]:
     )
 
     # 5 — Premissas empresa
-    emp = get_premissa_empresa(ano, mes)
-    if emp.meta_empresa_rs > 0:
+    from app.plano_metas import meta_empresa_mes
+
+    emp_ref = meta_empresa_mes(ano, mes)
+    if emp_ref > 0:
         st_emp = "ok"
-        sit_emp = f"Meta empresa R$ {emp.meta_empresa_rs:,.0f} salva para {ref}.".replace(
-            ",", "."
-        )
+        sit_emp = f"Meta empresa R$ {emp_ref:,.0f} para {ref}.".replace(",", ".")
         falta_emp = ""
     else:
         st_emp = "warn"
@@ -226,7 +226,7 @@ def avaliar_preparacao_mes(ano: int, mes: int) -> list[ReadinessCheck]:
             status=st_emp,
             titulo="Meta da empresa (premissa do mês)",
             passo_planilha="COMECE AQUI · passo 9 — meta total no PAINEL",
-            fonte_avinor="Salvar na seção **1 · Configurar o mês** (aba Início)",
+            fonte_avinor="Salvar na seção **1 · Meta do ano** (aba Início)",
             para_que_serve="Comparar soma das metas dos vendedores com a meta da empresa.",
             situacao=sit_emp,
             se_faltar=falta_emp,

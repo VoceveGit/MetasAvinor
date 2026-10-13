@@ -144,6 +144,34 @@ def load_resumo_periodo(
     }
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def load_faturamento_diario_mes(
+    ano: int,
+    mes: int,
+    vendedor_id: int | None,
+    apenas_positivos: bool,
+    excluir_sem_vendedor: bool,
+) -> pd.DataFrame:
+    """Faturamento por dia no mês (para evolução acumulada na Visão geral)."""
+    from app.dates_util import month_bounds
+
+    ini, fim = month_bounds(ano, mes)
+    extra, params = _filtros_sql(apenas_positivos, excluir_sem_vendedor, vendedor_id)
+    params = [ini.isoformat(), fim.isoformat()] + params
+    return read_sql(
+        f"""
+        SELECT
+            DATE(data) AS dia,
+            COALESCE(SUM(valor_total_faturado), 0) AS faturamento
+        FROM faturamento_avinor
+        WHERE data >= %s AND data < %s AND {extra}
+        GROUP BY DATE(data)
+        ORDER BY dia
+        """,
+        tuple(params),
+    )
+
+
 _CARTEIRA_JOIN = """
 INNER JOIN base_clientes_avinor b
     ON b.`Cliente` = f.cliente
@@ -152,34 +180,69 @@ INNER JOIN base_clientes_avinor b
 """
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def load_vendedor_meses(vendedor_id: int, ano: int, mes_fim: int, qtd: int = 3) -> pd.DataFrame:
-    """
-    Histórico mensal só com clientes da carteira ativa.
-    Positivação = linhas de produto vendidas (itens), não notas fiscais.
-    """
+@st.cache_data(ttl=1800, show_spinner=False)
+def _load_vendedores_meses_lote(ano: int, mes_meta: int, qtd: int = 3) -> dict[int, pd.DataFrame]:
+    """Histórico mensal de todos os vendedores numa query só (evita uma conexão por vendedor)."""
     df = read_sql(
         f"""
         SELECT
+            f.vendedor AS vendedor,
             YEAR(f.data) AS ano,
             MONTH(f.data) AS mes,
             COALESCE(SUM(f.valor_produto), 0) AS faturamento,
             COUNT(DISTINCT f.cliente) AS clientes,
-            SUM(CASE WHEN f.valor_produto > 0 THEN 1 ELSE 0 END) AS positivacao,
+            COUNT(DISTINCT CONCAT(f.serie, '-', f.numero)) AS positivacao,
             COUNT(DISTINCT CONCAT(f.serie, '-', f.numero)) AS notas
         FROM faturamento_avinor f
         {_CARTEIRA_JOIN}
-        WHERE f.vendedor = %s
-          AND f.valor_total_faturado > 0
+        WHERE f.valor_total_faturado > 0
           AND f.data >= DATE_SUB(DATE(CONCAT(%s, '-', %s, '-01')), INTERVAL %s MONTH)
-          AND f.data < DATE_ADD(DATE(CONCAT(%s, '-', %s, '-01')), INTERVAL 1 MONTH)
-        GROUP BY YEAR(f.data), MONTH(f.data)
-        ORDER BY ano, mes
+          AND f.data < DATE(CONCAT(%s, '-', %s, '-01'))
+        GROUP BY f.vendedor, YEAR(f.data), MONTH(f.data)
+        ORDER BY vendedor, ano, mes
         """,
-        (vendedor_id, ano, mes_fim, qtd - 1, ano, mes_fim),
+        (ano, mes_meta, qtd, ano, mes_meta),
     )
     if df.empty:
-        return df
+        return {}
+    return {
+        int(vid): g.drop(columns=["vendedor"]).reset_index(drop=True)
+        for vid, g in df.groupby("vendedor")
+    }
+
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def crescimento_ticket_lote(ano: int, mes_meta: int) -> tuple[dict[int, tuple[float, float]], float | None]:
+    """Ticket (fat ÷ notas) dos 3 meses fechados vs os mesmos 3 meses do ano anterior.
+
+    Retorna ({vendedor: (ticket_atual, ticket_ano_anterior)}, crescimento da equipe ou None).
+    """
+    atual = _load_vendedores_meses_lote(ano, mes_meta, 3)
+    antes = _load_vendedores_meses_lote(ano - 1, mes_meta, 3)
+
+    def _tk(df: pd.DataFrame | None) -> float:
+        if df is None or df.empty:
+            return 0.0
+        n = float(df["positivacao"].sum())
+        return float(df["faturamento"].sum()) / n if n > 0 else 0.0
+
+    por = {vid: (_tk(df), _tk(antes.get(vid))) for vid, df in atual.items()}
+    eq_a = _tk(pd.concat(atual.values())) if atual else 0.0
+    eq_b = _tk(pd.concat(antes.values())) if antes else 0.0
+    return por, (eq_a / eq_b - 1) if eq_a > 0 and eq_b > 0 else None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_vendedor_meses(vendedor_id: int, ano: int, mes_meta: int, qtd: int = 3) -> pd.DataFrame:
+    """
+    Histórico dos `qtd` meses fechados antes de `mes_meta`, só com clientes da carteira ativa.
+    Positivação = notas fiscais (cada venda conta uma vez, mesmo com vários itens).
+    """
+    lote = _load_vendedores_meses_lote(ano, mes_meta, qtd)
+    df = lote.get(int(vendedor_id))
+    if df is None or df.empty:
+        return pd.DataFrame(columns=["ano", "mes", "faturamento", "clientes", "positivacao", "notas"])
+    df = df.copy()
     df["periodo"] = df.apply(lambda r: label_mes(int(r["ano"]), int(r["mes"])), axis=1)
     df["ticket"] = df["faturamento"] / df["positivacao"].replace(0, pd.NA)
     df["recorrencia"] = df["positivacao"] / df["clientes"].replace(0, pd.NA)
@@ -203,9 +266,45 @@ def load_faturamento_vendedores_janela(inicio: date, fim_exclusive: date) -> pd.
     )
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def load_fat_empresa_mensal(anos: tuple[int, ...]) -> dict[tuple[int, int], float]:
+    """Faturamento da empresa por (ano, mês) — base do plano anual e da sazonalidade."""
+    if not anos:
+        return {}
+    df = read_sql(
+        f"""
+        SELECT YEAR(data) AS ano, MONTH(data) AS mes,
+               COALESCE(SUM(valor_total_faturado), 0) AS faturamento
+        FROM faturamento_avinor
+        WHERE valor_total_faturado > 0
+          AND YEAR(data) IN ({",".join(str(int(a)) for a in anos)})
+        GROUP BY YEAR(data), MONTH(data)
+        """
+    )
+    return {(int(r.ano), int(r.mes)): float(r.faturamento or 0) for r in df.itertuples()}
+
+
 @st.cache_data(ttl=300, show_spinner=False)
-def load_metricas_vendedor_trimestre(vendedor_id: int, ano: int, mes_fim: int) -> dict:
-    df = load_vendedor_meses(vendedor_id, ano, mes_fim, 3)
+def load_fat_vendedor_mes_ano(ano: int) -> dict[tuple[int, int], float]:
+    """Faturamento por (vendedor, mês) no ano — uma query para a compensação."""
+    df = read_sql(
+        """
+        SELECT vendedor, MONTH(data) AS mes,
+               COALESCE(SUM(valor_total_faturado), 0) AS faturamento
+        FROM faturamento_avinor
+        WHERE valor_total_faturado > 0 AND vendedor > 0
+          AND data >= %s AND data < %s
+        GROUP BY vendedor, MONTH(data)
+        """,
+        (date(ano, 1, 1).isoformat(), date(ano + 1, 1, 1).isoformat()),
+    )
+    return {(int(r.vendedor), int(r.mes)): float(r.faturamento or 0) for r in df.itertuples()}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_metricas_vendedor_trimestre(vendedor_id: int, ano: int, mes_meta: int) -> dict:
+    """Médias dos 3 meses fechados antes do mês da meta."""
+    df = load_vendedor_meses(vendedor_id, ano, mes_meta, 3)
     if df.empty:
         return {
             "fat_media": 0,
@@ -645,6 +744,25 @@ def load_panorama_metas_equipe(
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def load_equipe_mes(ano: int, mes: int, limit: int) -> pd.DataFrame:
+    """Quem vendeu no mês da meta ou nos 3 meses fechados antes (mês futuro também tem equipe)."""
+    from app.dates_util import month_bounds, three_months_prior_bounds
+
+    ini, fim = month_bounds(ano, mes)
+    h_ini, h_fim = three_months_prior_bounds(ano, mes)
+    mes_df = load_ranking_periodo(ini, fim, limit)
+    hist_df = load_ranking_periodo(h_ini, h_fim, limit)
+    if hist_df.empty:
+        return mes_df
+    novos = hist_df[~hist_df["vendedor"].isin(mes_df["vendedor"] if not mes_df.empty else [])].copy()
+    for col in ("faturamento", "clientes", "notas", "pct_faturamento", "tx_recorrencia", "tx_cobertura"):
+        if col in novos.columns:
+            novos[col] = 0
+    out = pd.concat([mes_df, novos], ignore_index=True) if not mes_df.empty else novos
+    return out.head(limit).reset_index(drop=True)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_grid_metas_colaboradores(
     ano: int,
     mes: int,
@@ -652,18 +770,16 @@ def load_grid_metas_colaboradores(
     limit: int = 80,
 ) -> pd.DataFrame:
     """Tabela estilo planilha Mari: histórico 3m + colunas editáveis (meta esperada)."""
-    from app.dates_util import month_bounds
     from app.indicadores_vendedor import calc_indicadores_3m
     from app.meta_frigosol import montar_bloco_frigosol
-    from app.premissas import get_premissa, get_premissa_empresa
+    from app.plano_metas import meta_empresa_mes
+    from app.premissas import get_premissa
 
-    ini, fim = month_bounds(ano, mes)
-    ranking = load_ranking_periodo(ini, fim, limit)
+    ranking = load_equipe_mes(ano, mes, limit)
     if ranking.empty:
         return ranking
 
-    emp = get_premissa_empresa(ano, mes)
-    meta_emp = float(emp.meta_empresa_rs or 0)
+    meta_emp = meta_empresa_mes(ano, mes)
 
     oport_df = load_oportunidades_rotas_equipe()
     oport_map = (
@@ -1133,3 +1249,60 @@ def load_preco_medio_produto_vendedor(
             "notas",
         ]
     ]
+
+
+@st.cache_data(ttl=3600, show_spinner="Buscando clientes parados…")
+def load_clientes_parados(hoje: date, meses: int = 6) -> pd.DataFrame:
+    """Uma consulta: compras por cliente/mês nos últimos `meses`.
+
+    Retorna 1 linha por cliente (vendedor = quem fez a última venda) com última compra,
+    dias sem comprar e média mensal dos 3 meses até a última compra.
+    """
+    y, m = hoje.year, hoje.month - meses
+    while m <= 0:
+        m += 12
+        y -= 1
+    ini = date(y, m, 1)
+    df = read_sql(
+        """
+        SELECT
+            a.vendedor, a.vendedor_nome, a.cliente, a.mi, a.ult, a.fat,
+            COALESCE(
+                NULLIF(TRIM(bc.`Nome Fantasia`), ''),
+                NULLIF(TRIM(bc.Nome), ''),
+                CONCAT('Cliente ', a.cliente)
+            ) AS cliente_nome,
+            UPPER(TRIM(bc.Cidade)) AS cidade
+        FROM (
+            SELECT
+                f.vendedor,
+                MAX(f.nome) AS vendedor_nome,
+                f.cliente,
+                YEAR(f.data) * 12 + MONTH(f.data) AS mi,
+                MAX(f.data) AS ult,
+                SUM(f.valor_total_faturado) AS fat
+            FROM faturamento_avinor f
+            WHERE f.data >= %s AND f.data <= %s
+              AND f.valor_total_faturado > 0
+              AND f.vendedor > 0
+            GROUP BY f.vendedor, f.cliente, YEAR(f.data) * 12 + MONTH(f.data)
+        ) a
+        LEFT JOIN base_clientes_avinor bc ON bc.Cliente = a.cliente
+        """,
+        (ini.isoformat(), hoje.isoformat()),
+    )
+    cols = ["vendedor", "vendedor_nome", "cliente", "cliente_nome", "cidade", "ult", "dias", "media_3m"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    df = df.drop_duplicates(["vendedor", "cliente", "mi"])
+    df["ult"] = pd.to_datetime(df["ult"]).dt.date
+    df["fat"] = df["fat"].astype(float)
+    df = df.sort_values("ult")
+    last = df.groupby("cliente", as_index=False).last()
+    mi_last = last.set_index("cliente")["mi"]
+    df["mi_last"] = df["cliente"].map(mi_last)
+    janela = df[df["mi"] > df["mi_last"] - 3]
+    media = janela.groupby("cliente")["fat"].sum() / 3.0
+    last["media_3m"] = last["cliente"].map(media).fillna(0.0)
+    last["dias"] = last["ult"].map(lambda d: (hoje - d).days)
+    return last[cols].reset_index(drop=True)

@@ -1,7 +1,10 @@
 import pandas as pd
 import plotly.graph_objects as go
 
-PRIMARY = "#ea580c"
+PRIMARY = "#2f6b55"
+BRAND_GREEN = "#1a4d3e"
+BRAND_GREEN_LIGHT = "rgba(22, 163, 74, 0.15)"
+META_LINE = "rgba(107, 114, 128, 0.55)"
 GHOST = "rgba(180, 140, 100, 0.35)"
 GHOST_LINE = "rgba(160, 120, 90, 0.25)"
 ACCENT = "#16a34a"
@@ -47,21 +50,21 @@ def chart_year_compare(df: pd.DataFrame, ano_focus: int, ano_ghost: int | None, 
                     x=focus["mes_label"],
                     y=focus["faturamento"],
                     name=str(ano_focus),
-                    marker=dict(color=PRIMARY),
+                    marker=dict(color=BRAND_GREEN),
                     width=0.38,
                 )
             )
             fig.update_layout(barmode="overlay")
         else:
             fig.add_trace(go.Bar(x=ghost["mes_label"], y=ghost["faturamento"], name=str(ano_ghost), marker_color=GHOST_LINE))
-            fig.add_trace(go.Bar(x=focus["mes_label"], y=focus["faturamento"], name=str(ano_focus), marker_color=PRIMARY))
+            fig.add_trace(go.Bar(x=focus["mes_label"], y=focus["faturamento"], name=str(ano_focus), marker_color=BRAND_GREEN))
             fig.update_layout(barmode="group", bargap=0.15)
     else:
         fig.add_trace(
             go.Bar(
                 x=focus["mes_label"],
                 y=focus["faturamento"],
-                marker=dict(color=focus["faturamento"], colorscale=[[0, "#fde4c8"], [1, PRIMARY]]),
+                marker=dict(color=focus["faturamento"], colorscale=[[0, "#d1fae5"], [1, BRAND_GREEN]]),
             )
         )
 
@@ -137,30 +140,64 @@ def chart_historico_meses(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
+PALETA_FAMILIAS = [
+    "#1f4d3a", "#2f6b55", "#3d8a6c", "#5aa886", "#86c4a3", "#b7d96b",
+    "#d9b44a", "#c9853a", "#a8603b", "#7a8f86", "#4f6b8a", "#8a6fa8",
+]
+
+
+def familias_agrupadas(df: pd.DataFrame, min_pct: float = 2.0) -> pd.DataFrame:
+    """Famílias com menos de `min_pct`% do total viram uma fatia "Outras"; cor fixa por posição."""
+    if df.empty:
+        return pd.DataFrame(columns=["familia", "faturamento", "pct", "cor"])
+    total = float(df["faturamento"].sum()) or 1.0
+    d = df[["familia", "faturamento"]].copy()
+    d["pct"] = d["faturamento"] / total * 100
+    d = d.sort_values("faturamento", ascending=False)
+    grandes = d[d["pct"] >= min_pct].head(len(PALETA_FAMILIAS) - 1)
+    resto = d.drop(grandes.index)
+    if not resto.empty:
+        grandes = pd.concat(
+            [grandes, pd.DataFrame([{
+                "familia": f"Outras ({len(resto)})",
+                "faturamento": float(resto["faturamento"].sum()),
+                "pct": float(resto["pct"].sum()),
+            }])],
+            ignore_index=True,
+        )
+    grandes = grandes.reset_index(drop=True)
+    grandes["cor"] = [PALETA_FAMILIAS[i % len(PALETA_FAMILIAS)] for i in range(len(grandes))]
+    if not resto.empty:
+        grandes.loc[len(grandes) - 1, "cor"] = "#c8d3cd"
+    return grandes
+
+
 def chart_familia_pizza(df: pd.DataFrame, titulo: str = "Faturamento por família") -> go.Figure:
     if df.empty:
         return go.Figure()
-    top = df.head(12).copy()
-    outros = float(df["faturamento"].iloc[12:].sum()) if len(df) > 12 else 0
-    if outros > 0:
-        top = pd.concat(
-            [top, pd.DataFrame([{"familia": "Outros", "faturamento": outros}])],
-            ignore_index=True,
-        )
+    top = familias_agrupadas(df)
     fig = go.Figure(
         go.Pie(
             labels=top["familia"],
             values=top["faturamento"],
-            hole=0.45,
-            textinfo="percent+label",
-            textposition="outside",
-            marker=dict(line=dict(color="#fff", width=1)),
+            hole=0.55,
+            sort=False,
+            direction="clockwise",
+            textinfo="percent",
+            textposition="inside",
+            insidetextorientation="horizontal",
+            texttemplate="%{percent:.0%}",
+            hovertemplate="<b>%{label}</b><br>%{percent:.1%}<extra></extra>",
+            marker=dict(colors=top["cor"], line=dict(color="#fff", width=2)),
         )
     )
+    fig.update_traces(textfont=dict(color="#fff", size=15))
     fig.update_layout(
-        title=dict(text=titulo, font=dict(size=14, color="#5c4a3a")),
-        height=420,
-        margin=dict(l=16, r=16, t=48, b=16),
+        title=dict(text=titulo, font=dict(size=15, color="#1f2d27")),
+        hoverlabel=dict(font_size=14),
+        height=400,
+        margin=dict(l=8, r=8, t=44, b=8),
+        uniformtext=dict(minsize=10, mode="hide"),
         paper_bgcolor="rgba(0,0,0,0)",
         font=dict(family="DM Sans, sans-serif"),
         showlegend=False,
@@ -303,5 +340,121 @@ def chart_top_vendedores(df: pd.DataFrame) -> go.Figure:
         xaxis=dict(tickprefix="R$ ", gridcolor=GRID),
         yaxis=dict(autorange="reversed"),
         font=dict(family="DM Sans, sans-serif"),
+    )
+    return fig
+
+
+def chart_acumulado(
+    x: list[str],
+    real_acum: list[float],
+    meta_acum: list[float],
+    x_title: str,
+) -> go.Figure:
+    """Realizado acumulado (pode parar antes do fim) vs. meta acumulada no mesmo eixo."""
+    fig = go.Figure()
+    if real_acum:
+        fig.add_trace(
+            go.Scatter(
+                x=x[: len(real_acum)],
+                y=real_acum,
+                mode="lines+markers" if len(x) <= 12 else "lines",
+                name="Realizado",
+                line=dict(color=BRAND_GREEN, width=2.5),
+                fill="tozeroy",
+                fillcolor=BRAND_GREEN_LIGHT,
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=meta_acum,
+            mode="lines",
+            name="Meta (ritmo)",
+            line=dict(color=META_LINE, width=2, dash="dash"),
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=320,
+        margin=dict(l=12, r=12, t=24, b=12),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.12, x=0),
+        font=dict(family="DM Sans, sans-serif", color="#374151"),
+        separators=",.",
+        xaxis=dict(title=x_title, showgrid=False, type="category"),
+        yaxis=dict(gridcolor=GRID, tickprefix="R$ ", tickformat=",.0f"),
+    )
+    return fig
+
+
+def chart_meta_evolucao_mes(
+    df_dia: pd.DataFrame,
+    meta_mes: float,
+    ano: int,
+    mes: int,
+) -> go.Figure:
+    """Acumulado diário no mês vs. meta linear (0 → meta no último dia)."""
+    from app.dates_util import month_bounds
+
+    ini, fim = month_bounds(ano, mes)
+    n_days = (fim - ini).days
+    if n_days <= 0:
+        n_days = 1
+
+    if df_dia.empty:
+        cum = pd.DataFrame(columns=["dia", "acum", "faturamento"])
+    else:
+        d = df_dia.copy()
+        d["dia"] = pd.to_datetime(d["dia"])
+        d = d.sort_values("dia")
+        d["acum"] = d["faturamento"].cumsum()
+        cum = d
+
+    days_axis = list(range(1, n_days + 1))
+    meta_line = [meta_mes * (d / n_days) for d in days_axis]
+    tick_step = max(1, len(days_axis) // 8)
+    tick_vals = days_axis[::tick_step]
+    tick_text = [f"{ini.day + i - 1:02d}" for i in tick_vals]
+
+    fig = go.Figure()
+    if not cum.empty:
+        day_nums = [row.dia.day for row in cum.itertuples()]
+        fig.add_trace(
+            go.Scatter(
+                x=day_nums,
+                y=cum["acum"].tolist(),
+                mode="lines",
+                name="Realizado",
+                line=dict(color=BRAND_GREEN, width=2.5),
+                fill="tozeroy",
+                fillcolor=BRAND_GREEN_LIGHT,
+            )
+        )
+    fig.add_trace(
+        go.Scatter(
+            x=days_axis,
+            y=meta_line,
+            mode="lines",
+            name="Meta (ritmo)",
+            line=dict(color=META_LINE, width=2, dash="dash"),
+        )
+    )
+    fig.update_layout(
+        template="plotly_white",
+        height=320,
+        margin=dict(l=12, r=12, t=24, b=12),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(orientation="h", y=1.12, x=0),
+        font=dict(family="DM Sans, sans-serif", color="#374151"),
+        xaxis=dict(
+            title="Dia do mês",
+            tickmode="array",
+            tickvals=tick_vals,
+            ticktext=tick_text,
+            showgrid=False,
+        ),
+        yaxis=dict(gridcolor=GRID, tickprefix="R$ ", tickformat=",.0f"),
     )
     return fig

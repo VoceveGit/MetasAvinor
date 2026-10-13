@@ -170,19 +170,89 @@ def parse_money_cell(value: Any) -> float:
     return max(0.0, parse_br_number(s, 0))
 
 
+_TOTAL_CSS = "background-color:#dfece4;color:#12261d;font-weight:700"
+
+
 def show_data_table(
     df: pd.DataFrame,
     spec: dict[str, ColKind] | None = None,
+    helps: dict[str, str] | None = None,
+    total: list[str] | None = None,
+    styles: dict[str, Any] | None = None,
+    progress: list[str] | None = None,
     **kwargs: Any,
 ) -> None:
-    """st.dataframe com padrão Avinor (R$ 1.234.567, sem abreviar mi/mil)."""
-    display = format_dataframe_columns(df, spec) if spec else df
+    """st.dataframe com padrão Avinor (R$ 1.234.567, sem abreviar mi/mil).
+
+    `helps`: explicação por coluna — o título ganha um ⓘ e o texto aparece ao passar o mouse.
+    `total`: colunas somadas numa linha TOTAL no fim (1ª coluna recebe o rótulo).
+    `styles`: {coluna: f(valor numérico) -> css} para pintar números.
+    `progress`: colunas de % mostradas como barra (0–100).
+    """
+    raw = df.reset_index(drop=True)
+    progress = [c for c in (progress or []) if c in raw.columns]
+    if total and not raw.empty:
+        row: dict[str, Any] = {c: None for c in raw.columns}
+        for c in total:
+            if c in raw.columns:
+                row[c] = pd.to_numeric(raw[c], errors="coerce").sum()
+        row[raw.columns[0]] = "TOTAL"
+        raw[raw.columns[0]] = raw[raw.columns[0]].astype(str)
+        raw = pd.concat([raw, pd.DataFrame([row])], ignore_index=True)
+    fmt_spec = {k: v for k, v in (spec or {}).items() if k not in progress}
+    display = format_dataframe_columns(raw, fmt_spec) if fmt_spec else raw.copy()
+    if total and not raw.empty:
+        for c in display.columns:
+            if c not in total and c != display.columns[0] and c not in progress:
+                display.iat[len(display) - 1, display.columns.get_loc(c)] = ""
+
+    cfg: dict[str, Any] = {}
+    for col in display.columns:
+        txt = (helps or {}).get(col)
+        label = f"{col} ⓘ" if txt else col
+        if col in progress:
+            cfg[col] = st.column_config.ProgressColumn(
+                label, help=txt, format="%.1f%%", min_value=0.0,
+                max_value=float(max(1.0, pd.to_numeric(raw[col], errors="coerce").max() or 1.0)),
+            )
+        elif txt:
+            cfg[col] = st.column_config.Column(label=label, help=txt)
+    if cfg:
+        kwargs.setdefault("column_config", cfg)
+
+    out: Any = display
+    if styles or (total and not raw.empty):
+        n_total = len(raw) - 1 if total and not raw.empty else None
+
+        def _css(_: pd.DataFrame) -> pd.DataFrame:
+            m = pd.DataFrame("", index=display.index, columns=display.columns)
+            for col, fn in (styles or {}).items():
+                if col not in raw.columns:
+                    continue
+                for i, v in enumerate(raw[col]):
+                    if i == n_total or v is None or (isinstance(v, float) and pd.isna(v)):
+                        continue
+                    m.iat[i, m.columns.get_loc(col)] = fn(float(v)) or ""
+            if n_total is not None:
+                m.iloc[n_total] = _TOTAL_CSS
+            return m
+
+        out = display.style.apply(_css, axis=None)
     st.dataframe(
-        display,
+        out,
         hide_index=True,
         use_container_width=True,
         **kwargs,
     )
+
+
+def css_sinal(v: float, neutro: float = 0.0) -> str:
+    """Vermelho abaixo de `neutro`, verde acima."""
+    if v < neutro:
+        return "color:#b42318;font-weight:700"
+    if v > neutro:
+        return "color:#1f7a4d;font-weight:700"
+    return ""
 
 
 def money_editor_column_config(

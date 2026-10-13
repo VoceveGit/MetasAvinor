@@ -12,11 +12,8 @@ from app.pacing import (
     pacing_cobertura_acumulada,
     pacing_cobertura_janela,
     pacing_faturamento_acumulado,
-    pacing_faturamento_dia,
     pacing_faturamento_janela,
     pacing_faturamento_mensal,
-    pacing_faturamento_semana,
-    weeks_in_month,
 )
 from app.pacing_ui import PacingView
 
@@ -72,35 +69,17 @@ def build_pacing_fat(
     metrics_cache: dict[tuple[int, str, str], Metrics] | None = None,
 ) -> PacingFat:
     m_ini, m_fim = month_bounds(view.selected_day.year, view.selected_day.month)
-    cumulativo = _is_cumulativo(modo_ref, view)
 
     if view.lente == "Mensal":
         mes = _get_metrics(vendedor_id, m_ini, m_fim, metrics_cache)
         return pacing_faturamento_mensal(meta_mes, float(mes["faturamento"]))
 
-    if cumulativo:
+    if _is_cumulativo(modo_ref, view):
         acum = _get_metrics(vendedor_id, m_ini, view.fim_exclusive, metrics_cache)
-        return pacing_faturamento_acumulado(
-            meta_mes,
-            float(acum["faturamento"]),
-            view.period_index,
-            view.n_periods,
-        )
+        return pacing_faturamento_acumulado(meta_mes, float(acum["faturamento"]), view.peso_acum)
 
     periodo = _get_metrics(vendedor_id, view.ini, view.fim_exclusive, metrics_cache)
-    if view.lente == "Semanal":
-        return pacing_faturamento_janela(
-            meta_mes,
-            float(periodo["faturamento"]),
-            view.period_index,
-            view.n_periods,
-        )
-    return pacing_faturamento_janela(
-        meta_mes,
-        float(periodo["faturamento"]),
-        view.period_index,
-        view.n_periods,
-    )
+    return pacing_faturamento_janela(meta_mes, float(periodo["faturamento"]), view.peso_periodo)
 
 
 def build_pacing_fat_equipe(
@@ -111,7 +90,6 @@ def build_pacing_fat_equipe(
     metrics_cache: dict[tuple[int, str, str], Metrics] | None = None,
 ) -> PacingFat:
     m_ini, m_fim = month_bounds(view.selected_day.year, view.selected_day.month)
-    cumulativo = _is_cumulativo(modo_ref, view)
 
     def sum_metric(ini, fim, field: str) -> float:
         total = 0.0
@@ -122,19 +100,17 @@ def build_pacing_fat_equipe(
     if view.lente == "Mensal":
         return pacing_faturamento_mensal(meta_mes, sum_metric(m_ini, m_fim, "faturamento"))
 
-    if cumulativo:
+    if _is_cumulativo(modo_ref, view):
         return pacing_faturamento_acumulado(
             meta_mes,
             sum_metric(m_ini, view.fim_exclusive, "faturamento"),
-            view.period_index,
-            view.n_periods,
+            view.peso_acum,
         )
 
     return pacing_faturamento_janela(
         meta_mes,
         sum_metric(view.ini, view.fim_exclusive, "faturamento"),
-        view.period_index,
-        view.n_periods,
+        view.peso_periodo,
     )
 
 
@@ -146,29 +122,14 @@ def build_pacing_cob(
     metrics_cache: dict[tuple[int, str, str], Metrics] | None = None,
 ) -> PacingCob:
     m_ini, m_fim = month_bounds(view.selected_day.year, view.selected_day.month)
-    cumulativo = _is_cumulativo(modo_ref, view)
 
     if view.lente == "Mensal":
         mes = _get_metrics(vendedor_id, m_ini, m_fim, metrics_cache)
-        return pacing_cobertura_acumulada(
-            meta_mes_clientes,
-            int(mes["clientes"]),
-            0,
-            1,
-        )
+        return pacing_cobertura_acumulada(meta_mes_clientes, int(mes["clientes"]), 1.0)
 
-    if cumulativo:
+    if _is_cumulativo(modo_ref, view):
         acum = _get_metrics(vendedor_id, m_ini, view.fim_exclusive, metrics_cache)
-        return pacing_cobertura_acumulada(
-            meta_mes_clientes,
-            int(acum["clientes"]),
-            view.period_index,
-            view.n_periods,
-        )
+        return pacing_cobertura_acumulada(meta_mes_clientes, int(acum["clientes"]), view.peso_acum)
 
     periodo = _get_metrics(vendedor_id, view.ini, view.fim_exclusive, metrics_cache)
-    return pacing_cobertura_janela(
-        meta_mes_clientes,
-        int(periodo["clientes"]),
-        view.n_periods,
-    )
+    return pacing_cobertura_janela(meta_mes_clientes, int(periodo["clientes"]), view.peso_periodo)

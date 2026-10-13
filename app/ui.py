@@ -4,19 +4,39 @@ import streamlit as st
 
 CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap');
+
+:root {
+    --avinor-bg: #f5f7f6;
+    --avinor-fg: #2f3d38;
+    --avinor-muted: #6b7a73;
+    --avinor-border: #e2e8e5;
+    --avinor-card: #ffffff;
+    --avinor-primary: #3d6b5c;
+    --avinor-sidebar: #2a3632;
+    --avinor-sidebar-fg: #f3f6f4;
+    --avinor-sidebar-muted: #9aaba3;
+    --avinor-sidebar-active: #3d524c;
+    --avinor-lime: #d4f574;
+    --avinor-nav-bg: #12261d;
+    --avinor-nav-active: #22382d;
+    --avinor-nav-muted: #b4c2ba;
+}
 
 html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
+    font-family: 'Manrope', sans-serif;
+    font-size: 14px;
 }
 
 .stApp {
-    background: linear-gradient(165deg, #faf6ee 0%, #f5efe3 45%, #f0e9dc 100%);
+    background: var(--avinor-bg);
+    color: var(--avinor-fg);
 }
 
 .main .block-container {
-    padding-top: 5.75rem;
-    max-width: 1280px;
+    max-width: 1480px;
+    padding-left: 2rem;
+    padding-right: 2rem;
 }
 
 /* Esconde sidebar — controles no topo e na Visão geral */
@@ -27,49 +47,179 @@ header[data-testid="stHeader"] {
     display: none !important;
 }
 
-.top-toolbar {
-    background: #fffdf8;
-    border: 1px solid #ebe3d5;
-    border-radius: 12px;
-    padding: 0.65rem 1rem 0.75rem;
-    margin-bottom: 0.75rem;
-    box-shadow: 0 2px 12px rgba(92, 61, 46, 0.05);
+[data-testid="stVerticalBlockBorderWrapper"]:has(.avinor-toolbar-anchor) {
+    background: var(--avinor-card) !important;
+    border: 1px solid var(--avinor-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 2px 5px rgba(32, 48, 40, 0.04) !important;
+    padding: 0.65rem 1rem !important;
+    margin-bottom: 1rem !important;
 }
 
-/* Menu fixo no topo — só o bloco do menu (scroll continua em section.main) */
-[data-testid="stVerticalBlockBorderWrapper"]:has(.avinor-nav-anchor),
-.avinor-nav-fixed {
+.st-key-avinor_nav_filtros button {
+    background: transparent !important;
+    color: #d9e4de !important;
+    border: 1px solid rgba(255, 255, 255, 0.18) !important;
+    border-radius: 10px !important;
+}
+.st-key-avinor_nav_filtros button:hover { background: rgba(255, 255, 255, 0.08) !important; }
+div[data-baseweb="popover"] { z-index: 1000000 !important; }
+
+/* —— Menu superior fixo (container com key="avinor_nav") —— */
+[data-testid="stMainBlockContainer"],
+.main .block-container {
+    padding-top: 6.25rem !important;
+}
+.st-key-avinor_nav {
     position: fixed !important;
-    top: 0 !important;
-    left: 0 !important;
-    right: 0 !important;
-    z-index: 1001 !important;
-    background: #faf6ee !important;
-    border: none !important;
-    border-bottom: 2px solid #e8dfd0 !important;
-    box-shadow: 0 4px 14px -6px rgba(92, 61, 46, 0.28) !important;
-    padding: 0.45rem 1rem 0.6rem !important;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 999990;
+    height: 76px;
+    padding: 0 32px !important;
+    box-sizing: border-box;
+    background: var(--avinor-nav-bg) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    gap: 6px !important;
+}
+.st-key-avinor_nav [data-testid="stElementContainer"] {
+    width: auto !important;
+}
+.avinor-brand-lockup {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    white-space: nowrap;
+    margin-right: 22px;
+}
+.avinor-brand-mark {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    background: var(--avinor-lime);
+    color: var(--avinor-nav-bg);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+.st-key-avinor_nav .avinor-brand-title {
+    font-size: 26px !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em;
+    color: #ffffff !important;
     margin: 0 !important;
-    box-sizing: border-box !important;
+    line-height: 1 !important;
 }
-[data-testid="stVerticalBlockBorderWrapper"]:has(.avinor-nav-anchor) > [data-testid="stVerticalBlock"] {
-    max-width: 1280px;
-    margin: 0 auto;
+.avinor-brand-title .brand-dot {
+    color: var(--avinor-lime);
 }
-.avinor-brand-title {
-    font-size: 1.05rem;
-    font-weight: 700;
-    color: #3d2817;
-    margin: 0;
-    line-height: 1.2;
+.st-key-avinor_nav button {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 8px !important;
+    padding: 10px 14px !important;
+    min-height: 44px !important;
+    color: var(--avinor-nav-muted) !important;
+    white-space: nowrap !important;
+    transition: background 0.15s ease, color 0.15s ease;
 }
-.avinor-brand-title span {
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: #c45c26;
+.st-key-avinor_nav button p {
+    font-size: 15px !important;
+    font-weight: 500 !important;
+    color: inherit !important;
 }
-div[data-testid="stRadio"] > label {
-    display: none !important;
+.st-key-avinor_nav button [data-testid="stIconMaterial"] {
+    font-size: 20px !important;
+    color: inherit !important;
+}
+.st-key-avinor_nav button:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    color: #ffffff !important;
+}
+.st-key-avinor_nav button[data-testid="stBaseButton-primary"] {
+    background: var(--avinor-nav-active) !important;
+    color: #ffffff !important;
+}
+.st-key-avinor_nav button[data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"] {
+    color: var(--avinor-lime) !important;
+}
+.st-key-avinor_nav button:focus,
+.st-key-avinor_nav button:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+}
+.avinor-nav-actions {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    color: var(--avinor-nav-muted);
+    white-space: nowrap;
+}
+.avinor-nav-actions .icon-btn {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    color: var(--avinor-nav-muted);
+}
+.avinor-nav-actions .icon-btn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+.avinor-nav-actions .divider {
+    width: 1px;
+    height: 28px;
+    background: rgba(255, 255, 255, 0.12);
+}
+.avinor-nav-actions .avatar {
+    width: 38px;
+    height: 38px;
+    border-radius: 999px;
+    background: #e3efe6;
+    color: var(--avinor-nav-bg);
+    display: grid;
+    place-items: center;
+    font-size: 13px;
+    font-weight: 800;
+}
+@media (max-width: 1180px) {
+    .st-key-avinor_nav {
+        padding: 0 16px !important;
+    }
+    .avinor-brand-lockup {
+        margin-right: 6px;
+    }
+    .st-key-avinor_nav button {
+        padding: 8px 10px !important;
+    }
+    .st-key-avinor_nav button p {
+        font-size: 14px !important;
+    }
+    .avinor-nav-actions {
+        gap: 8px;
+    }
+    .avinor-nav-actions .divider {
+        display: none;
+    }
+}
+@media (max-width: 960px) {
+    .st-key-avinor_nav button p {
+        display: none !important;
+    }
+}
+[data-testid="stVerticalBlockBorderWrapper"]:has(.vg-filter-anchor) {
+    background: #fff !important;
+    border: 1px solid #e5e7eb !important;
+    border-radius: 14px !important;
+    box-shadow: 0 1px 3px rgba(15, 51, 40, 0.06) !important;
+    padding: 0.75rem 1rem 0.85rem !important;
+    margin-bottom: 1rem !important;
 }
 /* Sidebar — laranja pastel */
 section[data-testid="stSidebar"] {
@@ -231,7 +381,7 @@ section[data-testid="stSidebar"] .stRadio label {
 div[data-testid="stTabs"] button[aria-selected="true"] {
     background-color: #fff3e0 !important;
     color: #9a3412 !important;
-    border-bottom: 2px solid #ea580c !important;
+    border-bottom: 2px solid #2f6b55 !important;
 }
 div[data-testid="stTabs"] button {
     color: #7a6555 !important;
@@ -296,114 +446,99 @@ def panel_box(title: str, hint: str, variant: str = "default"):
     )
 
 
-NAV_LABELS = (
-    "Início",
-    "Visão geral",
-    "Produtos & linhas",
-    "Colaboradores",
-    "Ranking",
+NAV_ITEMS = (
+    ("Início", ":material/home:"),
+    ("Visão geral", ":material/grid_view:"),
+    ("Produtos & linhas", ":material/inventory_2:"),
+    ("Colaboradores", ":material/group:"),
+    ("Progresso", ":material/trophy:"),
+)
+NAV_LABELS = tuple(label for label, _ in NAV_ITEMS)
+
+_BRAND_ICON_SVG = (
+    '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/>'
+    '<circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2" fill="currentColor"/></svg>'
+)
+_HELP_ICON_SVG = (
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/>'
+    '<path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6v.3"/><circle cx="12" cy="17" r=".6" '
+    'fill="currentColor"/></svg>'
+)
+_BELL_ICON_SVG = (
+    '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+    'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+    '<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>'
 )
 
 
+def _set_nav_page(label: str) -> None:
+    st.session_state["main_nav_page"] = label
+
+
 def render_fixed_nav(app_version: str, app_root: str | None = None) -> str:
-    """Menu principal sempre visível no topo, com versão ao lado do título."""
-    labels = list(NAV_LABELS)
-    with st.container(border=True):
-        st.markdown('<div class="avinor-nav-anchor"></div>', unsafe_allow_html=True)
-        brand, menu = st.columns([1.15, 4.85], gap="small")
-        with brand:
-            root_tip = (
-                f' title="Código: {html.escape(app_root)}"' if app_root else ""
+    """Barra superior fixa: marca, abas com ícone e ações à direita."""
+    page = st.session_state.get("main_nav_page", NAV_LABELS[0])
+    if page not in NAV_LABELS:
+        page = NAV_LABELS[0]
+        st.session_state["main_nav_page"] = page
+
+    tip = f"Metas Avinor · v{app_version}"
+    if app_root:
+        tip += f" · {app_root}"
+
+    with st.container(
+        key="avinor_nav",
+        horizontal=True,
+        vertical_alignment="center",
+        wrap=False,
+    ):
+        st.markdown(
+            f"""
+            <div class="avinor-brand-lockup" title="{html.escape(tip)}">
+              <div class="avinor-brand-mark">{_BRAND_ICON_SVG}</div>
+              <p class="avinor-brand-title">meta<span class="brand-dot">.</span></p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+            width="content",
+        )
+        for i, (label, icon) in enumerate(NAV_ITEMS):
+            st.button(
+                label,
+                key=f"avinor_nav_btn_{i}",
+                icon=icon,
+                type="primary" if label == page else "tertiary",
+                on_click=_set_nav_page,
+                args=(label,),
             )
-            st.markdown(
-                f'<p class="avinor-brand-title">Metas Avinor<br>'
-                f'<span{root_tip}>v{app_version}</span></p>',
-                unsafe_allow_html=True,
-            )
-        with menu:
-            prev = st.session_state.get("main_nav_page", labels[0])
-            if prev in labels and "main_nav_radio" not in st.session_state:
-                st.session_state["main_nav_radio"] = prev
-            page = st.radio(
-                "Menu principal",
-                labels,
-                horizontal=True,
-                label_visibility="collapsed",
-                key="main_nav_radio",
-            )
-    st.session_state["main_nav_page"] = page
-    _pin_nav_bar_only()
+        st.space("stretch")
+        with st.popover("Filtros", icon=":material/filter_alt:", key="avinor_nav_filtros"):
+            st.caption("Filtros de leitura do ERP (valem para todas as telas).")
+            st.toggle("Só vendas positivas", value=True, key="top_apenas_pos")
+            st.toggle("Esconder sem vendedor", value=True, key="top_sem_vend")
+        st.markdown(
+            f"""
+            <div class="avinor-nav-actions">
+              <span class="icon-btn" title="Ajuda">{_HELP_ICON_SVG}</span>
+              <span class="icon-btn" title="Notificações">{_BELL_ICON_SVG}</span>
+              <span class="divider"></span>
+              <span class="avatar">CS</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
+            width="content",
+        )
     return page
 
 
-def _pin_nav_bar_only() -> None:
-    """Fixa só a barra do menu; não mexe no overflow da página."""
-    import streamlit.components.v1 as components
-
-    components.html(
-        """
-        <script>
-        (function () {
-            const doc = window.parent.document;
-            function apply() {
-                const anchor = doc.querySelector(".avinor-nav-anchor");
-                if (!anchor) return;
-                let wrap = anchor.closest('[data-testid="stVerticalBlockBorderWrapper"]');
-                if (!wrap) {
-                    let node = anchor.parentElement;
-                    for (let i = 0; i < 10 && node; i++) {
-                        if (
-                            node.querySelector('[data-testid="stHorizontalBlock"]') &&
-                            node.querySelector(".avinor-brand-title")
-                        ) {
-                            const h = node.offsetHeight;
-                            if (h > 0 && h < 220) {
-                                wrap = node;
-                                break;
-                            }
-                        }
-                        node = node.parentElement;
-                    }
-                }
-                if (!wrap) return;
-                wrap.classList.add("avinor-nav-fixed");
-                wrap.style.setProperty("position", "fixed", "important");
-                wrap.style.setProperty("top", "0", "important");
-                wrap.style.setProperty("left", "0", "important");
-                wrap.style.setProperty("right", "0", "important");
-                wrap.style.setProperty("z-index", "1001", "important");
-                wrap.style.setProperty("background", "#faf6ee", "important");
-                const bc = doc.querySelector("section.main .block-container");
-                if (bc) {
-                    const h = wrap.getBoundingClientRect().height || 76;
-                    bc.style.setProperty("padding-top", (h + 14) + "px", "important");
-                }
-            }
-            apply();
-            setTimeout(apply, 100);
-            setTimeout(apply, 500);
-            window.parent.addEventListener("resize", apply, { passive: true });
-        })();
-        </script>
-        """,
-        height=0,
-    )
-
-
 def render_top_toolbar() -> dict[str, bool]:
-    st.markdown('<div class="top-toolbar">', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([2, 1, 1])
-    with c1:
-        st.markdown(
-            '<span style="color:#7a6555;">Filtros de leitura do ERP</span>',
-            unsafe_allow_html=True,
-        )
-    with c2:
-        apenas_pos = st.toggle("Só vendas positivas", value=True, key="top_apenas_pos")
-    with c3:
-        excluir_zero = st.toggle("Esconder sem vendedor", value=True, key="top_sem_vend")
-    st.markdown("</div>", unsafe_allow_html=True)
-    return {"apenas_positivos": apenas_pos, "excluir_sem_vendedor": excluir_zero}
+    """Filtros do ERP: os toggles ficam no popover do menu (render_fixed_nav)."""
+    return {
+        "apenas_positivos": bool(st.session_state.get("top_apenas_pos", True)),
+        "excluir_sem_vendedor": bool(st.session_state.get("top_sem_vend", True)),
+    }
 
 
 def section_header(title: str, subtitle: str = ""):

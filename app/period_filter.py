@@ -55,7 +55,7 @@ def _snap_dict(ini: date, fim: date, label: str) -> dict:
 
 
 def _render_period_widgets(key_prefix: str) -> None:
-    st.markdown("##### Período do ranking")
+    st.markdown("##### Período")
     modo = st.radio(
         "Granularidade",
         ["Mês", "Semana", "Dia", "Intervalo"],
@@ -127,7 +127,7 @@ def periodo_selector(
             st.rerun()
         if dirty:
             st.caption(
-                "Período alterado — clique **Aplicar período** para recarregar o ranking."
+                "Período alterado — clique **Aplicar período** para recarregar."
             )
         snap = st.session_state[applied_key]
     else:

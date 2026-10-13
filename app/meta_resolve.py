@@ -8,14 +8,14 @@ def resolve_meta_mes_cob(
     meta_calc: float,
     carteira: int,
 ) -> tuple[float, str, int]:
-    meta_prop = float(row.get("meta_prop_mes_rs") or 0)
+    meta_prop = float(row.get("meta_plano_rs") or row.get("meta_prop_mes_rs") or 0)
     cob_meta = int(float(row.get("cobertura_meta_clientes") or 0))
 
-    if meta_ref == "Proporcional" and meta_prop > 0:
+    if meta_ref in ("Plano", "Proporcional") and meta_prop > 0:
         meta_mes = meta_prop
-        meta_tipo = "proporcional"
+        meta_tipo = "plano"
         cob_sug = row.get("cob_prop_sug")
-        if cob_sug is not None:
+        if cob_meta <= 0 and cob_sug is not None:
             cob_meta = int(cob_sug)
     elif meta_ref == "Manual":
         meta_mes = meta_man if meta_man > 0 else meta_calc
