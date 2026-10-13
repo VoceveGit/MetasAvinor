@@ -144,6 +144,12 @@ _CUSTOM_CSS = {
         "border-radius": "8px",
         "border": "none !important",
     },
+    ".ag-overlay-loading-wrapper": {"display": "none !important"},
+    ".ag-cell-edit-input": {
+        "font": "inherit",
+        "text-align": "right",
+        "padding": "0 8px",
+    },
 }
 
 _MONEY_FIELDS = frozenset(
@@ -231,7 +237,7 @@ def _js_sug_style(base: dict):
     )
 
 
-def _js_grid_ready():
+def _js_grid_ready(quiet: bool = False):
     from st_aggrid.shared import JsCode
 
     return JsCode(
@@ -239,7 +245,8 @@ def _js_grid_ready():
         function(params) {
             window.__avinorGrid = window.__avinorGrid || {};
             var g = window.__avinorGrid;
-            if (g._ready !== 'v5') {
+            g.quiet = __QUIET__;
+            if (g._ready !== 'v6') {
             g.n = function(v) {
                 var x = Number(v);
                 return isNaN(x) ? 0 : x;
@@ -393,11 +400,11 @@ def _js_grid_ready():
                 }]);
                 g.refreshPinned(api);
             };
-            g._ready = 'v5';
+            g._ready = 'v6';
             }
             g.refreshTotals(params.api);
         }
-        """
+        """.replace("__QUIET__", "true" if quiet else "false")
     )
 
 
@@ -427,6 +434,7 @@ def _js_tooltip(ctx: dict):
     return JsCode(
         """
         function(params) {
+            if (window.__avinorGrid && window.__avinorGrid.quiet) return null;
             var C = __CTX__;
             var d = params.data;
             if (!d) return null;
@@ -533,12 +541,106 @@ def _js_tooltip(ctx: dict):
     )
 
 
+def _js_live_editor():
+    """Editor com máscara pt-BR enquanto digita (R$ milhar, %, 1 decimal)."""
+    from st_aggrid.shared import JsCode
+
+    return JsCode(
+        """
+        class {
+            init(params) {
+                this.params = params;
+                this.kind = params.kind || (params.cellEditorParams && params.cellEditorParams.kind) || 'int';
+                this.eInput = document.createElement('input');
+                this.eInput.className = 'ag-cell-edit-input ag-input-field-input';
+                this.eInput.setAttribute('inputmode', this.kind === 'rec' ? 'decimal' : 'numeric');
+                this.eInput.value = this._fmtInit(params.value);
+                var self = this;
+                this.eInput.addEventListener('input', function () { self._mask(); });
+            }
+            _fmtInit(v) {
+                if (v === null || v === undefined || v === '') return '';
+                var n = Number(v);
+                if (isNaN(n)) return '';
+                if (this.kind === 'money') return 'R$ ' + Math.round(n).toLocaleString('pt-BR');
+                if (this.kind === 'pct') return String(Math.round(n)) + '%';
+                return n.toLocaleString('pt-BR', {minimumFractionDigits: 1, maximumFractionDigits: 1});
+            }
+            _mask() {
+                var el = this.eInput;
+                var pos = el.selectionStart || 0;
+                var left = el.value.slice(0, pos).replace(/\\D/g, '').length;
+                var out;
+                if (this.kind === 'rec') {
+                    var raw = el.value.replace(/[^\\d,]/g, '');
+                    var p = raw.split(',');
+                    out = (p[0] || '').replace(/\\D/g, '');
+                    if (raw.indexOf(',') >= 0) out += ',' + (p.slice(1).join('').replace(/\\D/g, '').slice(0, 1));
+                } else {
+                    var d = el.value.replace(/\\D/g, '');
+                    if (!d) { el.value = ''; return; }
+                    d = d.replace(/^0+(?=\\d)/, '');
+                    if (this.kind === 'money') out = 'R$ ' + d.replace(/\\B(?=(\\d{3})+(?!\\d))/g, '.');
+                    else out = d + '%';
+                }
+                if (out === el.value) return;
+                el.value = out;
+                if (this.kind === 'rec') return;
+                var i = 0, seen = 0;
+                while (i < out.length && seen < left) { if (/\\d/.test(out[i])) seen++; i++; }
+                try { el.setSelectionRange(i, i); } catch (e) {}
+            }
+            getGui() { return this.eInput; }
+            afterGuiAttached() { this.eInput.focus(); this.eInput.select(); }
+            getValue() {
+                var s = (this.eInput.value || '').trim();
+                if (!s) return null;
+                if (this.kind === 'rec') {
+                    var n = Number(s.replace(/\\./g, '').replace(',', '.'));
+                    return isNaN(n) ? null : n;
+                }
+                var d = s.replace(/\\D/g, '');
+                if (!d) return null;
+                return Number(d);
+            }
+            isCancelAfterEnd() { return false; }
+            destroy() {}
+            isPopup() { return false; }
+        }
+        """
+    )
+
+
+def _js_parse_br():
+    from st_aggrid.shared import JsCode
+
+    return JsCode(
+        """
+        function(params) {
+            var v = params.newValue;
+            if (v === '' || v === null || v === undefined) return null;
+            if (typeof v === 'number') return isNaN(v) ? null : v;
+            var s = String(v).replace(/R\\$ /gi, '').replace(/%/g, '').trim();
+            if (!s) return null;
+            if (s.indexOf(',') >= 0) s = s.replace(/\\./g, '').replace(',', '.');
+            else {
+                var parts = s.split('.');
+                if (parts.length > 1 && parts[parts.length - 1].length === 3) s = parts.join('');
+            }
+            var n = Number(s);
+            return isNaN(n) ? null : n;
+        }
+        """
+    )
+
+
 def _try_aggrid(
     df: pd.DataFrame,
     height: int,
     grid_key: str,
     locked: bool = False,
     ctx: dict | None = None,
+    tips: bool = True,
 ) -> pd.DataFrame | None:
     try:
         from st_aggrid import AgGrid, DataReturnMode, GridOptionsBuilder, GridUpdateMode
@@ -548,6 +650,12 @@ def _try_aggrid(
 
     pinned = [total_row_from_aggrid_df(df)]
     tooltip = _js_tooltip(ctx or {"mes": "", "base": 0, "uteis": 0})
+    live_ed = _js_live_editor()
+    parse_br = _js_parse_br()
+    css = dict(_CUSTOM_CSS)
+    if not tips:
+        css[".ag-header-cell-text::after"] = {"content": "none"}
+        css[".ag-tooltip"] = {"display": "none !important"}
 
     fmt_brl = JsCode(
         """
@@ -719,10 +827,11 @@ def _try_aggrid(
             "resizable": True,
             "filter": field == "colab",
             "sortable": field in ("colab", "meta_calc", "meta_final", "realizado"),
-            "tooltipValueGetter": tooltip,
         }
-        if field in _HEADER_HELP:
-            opts["headerTooltip"] = _HEADER_HELP[field]
+        if tips:
+            opts["tooltipValueGetter"] = tooltip
+            if field in _HEADER_HELP:
+                opts["headerTooltip"] = _HEADER_HELP[field]
         if field == "colab":
             opts["pinned"] = "left"
             opts["lockPinned"] = True
@@ -740,16 +849,14 @@ def _try_aggrid(
             opts["valueGetter"] = vg_ajuste
         if field in AGGRID_EDITABLE_FIELDS:
             opts["type"] = ["numericColumn", "numberColumnFilter"]
-            opts["valueParser"] = JsCode(
-                """
-                function(params){
-                    if (params.newValue === '' || params.newValue === null) return null;
-                    var v = String(params.newValue).replace('%','').replace(',','.').trim();
-                    var n = Number(v);
-                    return isNaN(n) ? null : n;
-                }
-                """
-            )
+            opts["valueParser"] = parse_br
+            opts["cellEditor"] = live_ed
+            if field == "rec":
+                opts["cellEditorParams"] = {"kind": "rec"}
+            elif field in ("ticket", "meta_man"):
+                opts["cellEditorParams"] = {"kind": "money"}
+            else:
+                opts["cellEditorParams"] = {"kind": "pct"}
             if field in _SUG_FIELDS:
                 opts["valueFormatter"] = fmt_sug
                 opts["cellStyle"] = _js_sug_style(cell_style)
@@ -786,7 +893,7 @@ def _try_aggrid(
         autoHeaderHeight=True,
     )
     on_edit = _js_after_edit()
-    on_ready = _js_grid_ready()
+    on_ready = _js_grid_ready(quiet=not tips)
     gb.configure_grid_options(
         headerHeight=48,
         rowHeight=36,
@@ -794,9 +901,12 @@ def _try_aggrid(
         suppressRowClickSelection=True,
         singleClickEdit=True,
         stopEditingWhenCellsLoseFocus=True,
+        enterNavigatesVertically=True,
+        enterNavigatesVerticallyAfterEdit=True,
+        suppressLoadingOverlay=True,
         animateRows=False,
         domLayout="normal",
-        tooltipShowDelay=250,
+        tooltipShowDelay=400 if tips else 60000,
         tooltipHideDelay=12000,
         tooltipMouseTrack=False,
         pinnedBottomRowData=pinned,
@@ -821,12 +931,13 @@ def _try_aggrid(
         width="100%",
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         update_mode=GridUpdateMode.VALUE_CHANGED,
-        update_on=[("cellValueChanged", 250)],
+        update_on=[("cellValueChanged", 400)],
         allow_unsafe_jscode=True,
         theme="streamlit",
         key=grid_key,
         fit_columns_on_grid_load=False,
-        custom_css=_CUSTOM_CSS,
+        custom_css=css,
+        server_sync_strategy="client_wins",
     )
     return pd.DataFrame(grid["data"])
 
@@ -874,6 +985,7 @@ def render_equipe_grid(
     state_key: str,
     locked: bool = False,
     ctx: dict | None = None,
+    tips: bool = True,
 ) -> None:
     height = GRID_VIEW_HEIGHT
     nonce = int(st.session_state.get(f"{state_key}_nonce", 0))
@@ -881,7 +993,8 @@ def render_equipe_grid(
     editor_key = f"{state_key}_ed"
 
     ag_df = rows_to_aggrid_df(state_rows)
-    ag = _try_aggrid(ag_df, height, grid_key, locked=locked, ctx=ctx)
+    with st.container(key="equipe_aggrid"):
+        ag = _try_aggrid(ag_df, height, grid_key, locked=locked, ctx=ctx, tips=tips)
     if ag is not None:
         st.session_state[f"{state_key}_agdf"] = ag
         return

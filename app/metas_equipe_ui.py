@@ -53,6 +53,13 @@ _CSS = """
 .metas-previa .p.status.lock{background:#f3f5f4}
 .metas-legenda{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--avinor-muted);margin:.1rem 0 .45rem}
 .metas-legenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+.st-key-equipe_aggrid [data-stale="true"],
+.st-key-equipe_aggrid [data-stale="true"] iframe,
+div[data-testid="stElementContainer"][data-stale="true"]:has(iframe) {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  filter: none !important;
+}
 @media (max-width:1000px){.metas-previa{grid-template-columns:1fr}}
 </style>
 """
@@ -349,24 +356,47 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
             )
 
     previa_slot = st.empty()
-    st.markdown(
-        '<div class="metas-legenda">'
-        '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>você preenche</span>'
-        '<span><i style="background:#fbefc9;border:1px solid #d4a017"></i>'
-        '<b style="color:#9a6b00;font-style:italic">sugestão</b> (vale quando o azul está vazio)</span>'
-        '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>plano anual (automático)</span>'
-        '<span><i style="background:#e6f2ea;border:1px solid #3d6b5c"></i>meta que vale</span>'
-        "<span>Passe o mouse em qualquer célula ou no <b>?</b> do título para ver a conta.</span>"
-        "</div>",
-        unsafe_allow_html=True,
-    )
+    if "equipe_grid_tips" not in st.session_state:
+        st.session_state.equipe_grid_tips = True
+    leg_l, leg_r = st.columns([5.4, 1.2], vertical_alignment="center")
+    with leg_l:
+        extra = (
+            "<span>Passe o mouse na célula ou no <b>?</b> do título para ver a conta.</span>"
+            if st.session_state.equipe_grid_tips
+            else ""
+        )
+        st.markdown(
+            '<div class="metas-legenda">'
+            '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>você preenche</span>'
+            '<span><i style="background:#fbefc9;border:1px solid #d4a017"></i>'
+            '<b style="color:#9a6b00;font-style:italic">sugestão</b> (vale quando o azul está vazio)</span>'
+            '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>plano anual (automático)</span>'
+            '<span><i style="background:#e6f2ea;border:1px solid #3d6b5c"></i>meta que vale</span>'
+            f"{extra}</div>",
+            unsafe_allow_html=True,
+        )
+    with leg_r:
+        st.toggle(
+            "Explicações",
+            key="equipe_grid_tips",
+            help="Liga ou desliga as contas ao passar o mouse nas células e o ? nos títulos desta tabela.",
+        )
 
     ctx = {
         "mes": label_mes(ano, mes),
         "base": round(meta_plano_mes(ano, mes), 0),
         "uteis": business_days_in_month(ano, mes),
     }
-    render_equipe_grid(rows, ano, mes, taxa, state_key, locked=not editavel, ctx=ctx)
+    render_equipe_grid(
+        rows,
+        ano,
+        mes,
+        taxa,
+        state_key,
+        locked=not editavel,
+        ctx=ctx,
+        tips=bool(st.session_state.equipe_grid_tips),
+    )
 
     agdf = st.session_state.get(agdf_key)
     rows_live = rows_from_aggrid_df(rows, agdf, taxa) if agdf is not None else rows
