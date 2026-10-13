@@ -9,5 +9,7 @@ plano_metas_local.json
 audios_tmp/
 *.wav
 *.xlsx
+# Planilha de rotas necessária no Render (oportunidades da grade)
+!data/ROTAS AVINOR.xlsx
 avinor_db_explore.json
 avinor_db_summary.json

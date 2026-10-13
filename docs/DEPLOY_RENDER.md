@@ -29,12 +29,18 @@ Na primeira subida com Neon vazio, se existir JSON local na máquina de dev, a m
 
 Ou importe o `render.yaml` como Blueprint.
 
-## 3. MySQL EXTRACTOR
+## 3. Planilha de rotas
+
+Copie `ROTAS AVINOR.xlsx` para `data/ROTAS AVINOR.xlsx` e faça commit (o `.gitignore` ignora outros `.xlsx`, mas permite este arquivo).
+
+Sem ela, a grade do Início quebra com `FileNotFoundError`. Upload pelo app grava no disco do Render e **some no próximo deploy** — prefira versionar em `data/`.
+
+## 4. MySQL EXTRACTOR
 
 O Render precisa **alcançar** o host MySQL (firewall / allowlist de IP).
 Sem isso o painel sobe, mas as consultas ERP falham.
 
-## 4. Cuidados (plano free)
+## 5. Cuidados (plano free)
 
 - Cold start após ~15 min sem uso.
 - Evite consultas pesadas sem cache; use índices em `sql/mysql_indexes_recommended.sql` no MySQL.
