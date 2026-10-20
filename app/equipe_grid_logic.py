@@ -23,70 +23,137 @@ EDITABLE_KEYS = (
     "tx_conv_projetada_pct",
     "ticket_meta",
     "recorrencia_meta",
+    "positivacao_meta",
     "meta_manual",
 )
 
 EDITABLE_LABELS = {
-    "conv_meta_pct": "Conversão",
-    "tx_conv_projetada_pct": "TX conv. projetada",
-    "ticket_meta": "Ticket médio",
-    "recorrencia_meta": "Recorrência",
-    "meta_manual": "Meta manual (R$)",
+    "conv_meta_pct": "Conversão manual",
+    "tx_conv_projetada_pct": "% Ativação manual",
+    "ticket_meta": "Ticket médio manual",
+    "recorrencia_meta": "Recorrência manual",
+    "positivacao_meta": "Positivação manual",
+    "meta_manual": "Faturamento manual",
 }
 
 # Campos ASCII no AgGrid (evita bug de JS com "." e acentos nos nomes de coluna)
 AGGRID_FIELD_LABELS: tuple[tuple[str, str], ...] = (
     ("vid", "Cód."),
     ("aj_info", "Origem do ajuste"),
+    ("tk_info", "Cálculo ticket sugerido"),
     ("colab", "Colaborador"),
     ("cart", "Carteira"),
+    ("tx_cob_hist", "% Ativação média"),
+    ("tx_proj_sug", "% Ativação sugerida"),
+    ("tx_proj", "% Ativação manual"),
+    ("cob", "Cobertura calculada"),
     ("oport", "Oportunidades"),
-    ("tx_oport", "TX conv. oport."),
-    ("conv", "Conversão"),
-    ("oport_calc", "Oport. calc."),
-    ("cob_media", "Cobertura média"),
-    ("tx_cob_hist", "TX conv. (média)"),
-    ("tx_proj", "TX conv. projetada"),
-    ("cob", "Cobertura"),
-    ("dif_cob", "Dif. cart. × cob."),
-    ("fat_media", "Fat. média"),
-    ("pos_media", "Positivação média"),
-    ("ticket_hist", "Ticket histórico"),
-    ("ticket", "Ticket médio"),
-    ("ticket_sug", "Ticket sugerido"),
-    ("tk_info", "Cálculo ticket sugerido"),
-    ("rec_media", "Recorrência média"),
-    ("rec", "Recorrência"),
+    ("tx_oport", "Conversão média"),
     ("conv_sug", "Conversão sugerida"),
-    ("tx_proj_sug", "TX projetada sugerida"),
+    ("conv", "Conversão manual"),
+    ("oport_calc", "Oportunidades calculadas"),
+    ("pos_media", "Positivação média"),
+    ("pos_sug", "Positivação sugerida"),
+    ("pos", "Positivação manual"),
+    ("rec_media", "Recorrência média"),
     ("rec_sug", "Recorrência sugerida"),
-    ("meta_calc", "Meta calc."),
+    ("rec", "Recorrência manual"),
+    ("ticket_hist", "Ticket médio (hist.)"),
+    ("ticket_sug", "Ticket médio sugerido"),
+    ("ticket", "Ticket médio manual"),
+    ("fat_media", "Faturamento médio"),
+    ("meta_calc", "Faturamento sugerido"),
+    ("meta_man", "Faturamento manual"),
     ("peso_3m", "Peso fat. 3m %"),
     ("meta_prop", "Meta automática"),
-    ("meta_man", "Meta manual (R$)"),
     ("ajuste", "Ajuste %"),
     ("meta_final", "Meta do mês"),
     ("realizado", "Realizado (mês)"),
+    ("cob_media", "Cobertura média"),
+    ("dif_cob", "Dif. cart. × cob."),
     ("meta_prop_sem", "Meta autom. semana"),
     ("meta_prop_dia", "Meta autom. dia útil"),
     ("pos_prop", "Posit. sugeridas"),
     ("cob_prop", "Cobertura sugerida"),
 )
 AGGRID_HIDDEN_FIELDS = frozenset(
-    {"vid", "aj_info", "tk_info", "conv_sug", "tx_proj_sug", "rec_sug"}
+    {
+        "vid",
+        "aj_info",
+        "tk_info",
+        "cob_media",
+        "dif_cob",
+        "meta_prop_sem",
+        "meta_prop_dia",
+        "pos_prop",
+        "cob_prop",
+    }
 )
 
 AGGRID_LABEL_TO_FIELD = {lbl: fld for fld, lbl in AGGRID_FIELD_LABELS}
-AGGRID_EDITABLE_FIELDS = frozenset({"conv", "tx_proj", "ticket", "rec", "meta_man"})
+AGGRID_EDITABLE_FIELDS = frozenset({"conv", "tx_proj", "ticket", "rec", "pos", "meta_man"})
 AGGRID_KEY_TO_FIELD = {
     "conv_meta_pct": "conv",
     "tx_conv_projetada_pct": "tx_proj",
     "ticket_meta": "ticket",
     "recorrencia_meta": "rec",
+    "positivacao_meta": "pos",
     "meta_manual": "meta_man",
 }
 
-GRID_VIEW_HEIGHT = 420
+# Guia acima da grade: salto para o bloco + lote na coluna azul da seção.
+GRID_SECTIONS: tuple[dict, ...] = (
+    {
+        "id": "ativacao",
+        "label": "Ativação",
+        "jump": "cart",
+        "lote_key": "tx_conv_projetada_pct",
+        "kind": "pct",
+        "hint": "Aplica a ativação manual em todos.",
+    },
+    {
+        "id": "conversao",
+        "label": "Conversão",
+        "jump": "oport",
+        "lote_key": "conv_meta_pct",
+        "kind": "pct",
+        "hint": "Aplica a conversão manual em todos.",
+    },
+    {
+        "id": "positivacao",
+        "label": "Positivação",
+        "jump": "pos_media",
+        "lote_key": "positivacao_meta",
+        "kind": "int",
+        "hint": "Aplica a positivação manual em todos.",
+    },
+    {
+        "id": "recorrencia",
+        "label": "Recorrência",
+        "jump": "rec_media",
+        "lote_key": "recorrencia_meta",
+        "kind": "rec",
+        "hint": "Aplica a recorrência manual em todos.",
+    },
+    {
+        "id": "ticket",
+        "label": "Ticket",
+        "jump": "ticket_hist",
+        "lote_key": "ticket_meta",
+        "kind": "money",
+        "hint": "Aplica o ticket manual em todos.",
+    },
+    {
+        "id": "faturamento",
+        "label": "Faturamento",
+        "jump": "fat_media",
+        "lote_key": "meta_manual",
+        "kind": "money",
+        "hint": "Aplica o faturamento manual em todos.",
+    },
+)
+
+GRID_VIEW_HEIGHT = 520
 
 
 def _oport_rotas(vendedor_id: int) -> int | None:
@@ -115,6 +182,7 @@ def premissa_tem_prescricao(prem: PremissaVendedor) -> bool:
         or prem.cobertura_meta_pct > 0
         or prem.ticket_meta > 0
         or prem.meta_recorrencia > 0
+        or prem.meta_positivacao > 0
         or (prem.usar_meta_oficial_rs and prem.meta_faturamento_rs > 0)
     )
 
@@ -134,6 +202,7 @@ def aplicar_premissa_salva(row: dict, ano: int, mes: int, taxa: float) -> dict:
     out["oport_meta"] = float(prem.oportunidades_mes)
     out["ticket_meta"] = float(prem.ticket_meta)
     out["recorrencia_meta"] = float(prem.meta_recorrencia)
+    out["positivacao_meta"] = float(prem.meta_positivacao)
     if prem.usar_meta_oficial_rs and prem.meta_faturamento_rs > 0:
         out["meta_manual"] = float(prem.meta_faturamento_rs)
     else:
@@ -151,6 +220,7 @@ def premissa_from_row(row: dict) -> PremissaVendedor:
         cobertura_meta_pct=tx_proj,
         ticket_meta=_f(row, "ticket_meta"),
         meta_recorrencia=_f(row, "recorrencia_meta"),
+        meta_positivacao=_f(row, "positivacao_meta"),
         meta_faturamento_rs=manual,
         usar_meta_oficial_rs=manual > 0,
         taxa_cobertura=0.9,
@@ -180,6 +250,7 @@ SUGESTAO_KEYS = {
     "tx_conv_projetada_pct": "tx_proj_sugerido",
     "ticket_meta": "ticket_sugerido",
     "recorrencia_meta": "rec_sugerido",
+    "positivacao_meta": "pos_sugerido",
 }
 
 
@@ -209,6 +280,8 @@ def limpar_insercoes(rows: list[dict], taxa: float) -> list[dict]:
         x = dict(r)
         for k in EDITABLE_KEYS:
             x[k] = 0.0
+        for i in range(1, 6):
+            x[f"peso_sem_man_{i}"] = 0.0
         out.append(recalc_row_formulas_only(x, taxa))
     return out
 
@@ -228,7 +301,8 @@ def recalc_row_formulas_only(row: dict, taxa: float) -> dict:
     if cart > 0 and cob > cart:
         cob = cart
     out["oport_calc_pos"] = round(oport * conv / 100.0) if conv > 0 and oport > 0 else 0
-    out["posit_meta"] = round(cob * rec) if cob > 0 and rec > 0 else 0
+    out["pos_sugerido"] = round(cob * rec) if cob > 0 and rec > 0 else 0
+    out["posit_meta"] = valor_efetivo(out, "positivacao_meta")
     out["cobertura_meta_clientes"] = cob
     out["diff_carteira_cob"] = max(cart - cob, 0) if cob > 0 else 0
     if ticket > 0 and rec > 0 and cob > 0:
@@ -298,6 +372,7 @@ def row_from_loader(r: dict, ano: int, mes: int, taxa: float) -> dict:
         "positivacao_media_3m": ind["positivacao_media_3m"],
         "recorrencia_media": ind["recorrencia_media"],
         "recorrencia_meta": _loader_num(r, "recorrencia_meta"),
+        "positivacao_meta": _loader_num(r, "positivacao_meta"),
         "oport_meta": _loader_num(r, "oport_meta"),
         "meta_manual": _loader_num(r, "meta_manual"),
         "realizado_mes": float(r["realizado_mes"]),
@@ -427,6 +502,11 @@ def total_row_from_aggrid_df(df: pd.DataFrame) -> dict:
         "tx_cob_hist": round(tx_cob_media, 2),
         "fat_media": round(fat, 0),
         "pos_media": int(round(pos)),
+        "pos_sug": int(round(sum(
+            _cob_row(r) * _ef(r, "rec") for _, r in d.iterrows()
+            if _cob_row(r) > 0 and _ef(r, "rec") > 0
+        ))),
+        "pos": None,
         "ticket_hist": None,
         "ticket": None,
         "ticket_sug": None,
@@ -515,6 +595,53 @@ def grid_totals(rows: list[dict]) -> dict[str, float]:
     }
 
 
+def aplicar_lote_coluna(rows: list[dict], key: str, valor: float, taxa: float) -> list[dict]:
+    """Preenche a coluna azul da seção em todos os colaboradores."""
+    if key not in EDITABLE_KEYS:
+        return rows
+    out = []
+    for r in rows:
+        x = dict(r)
+        x[key] = float(valor)
+        out.append(recalc_row_formulas_only(x, taxa))
+    return out
+
+
+def coluna_confere_lote(rows: list[dict], key: str, valor: float, tol: float = 0.05) -> bool:
+    """True se todo mundo já está com o azul do lote."""
+    if not rows:
+        return True
+    v = float(valor)
+    return all(abs(_f(r, key) - v) < tol for r in rows)
+
+
+def snapshot_lote_coluna(rows: list[dict], key: str) -> dict[int, float]:
+    """Guarda o azul de cada um (0 = estava na sugestão) para poder desfazer o lote."""
+    return {int(r["vendedor"]): _f(r, key) for r in rows}
+
+
+def restaurar_lote_coluna(
+    rows: list[dict],
+    key: str,
+    bak: dict[int, float],
+    lote_val: float,
+    taxa: float,
+) -> list[dict]:
+    """Apagou o lote: volta o manual anterior, ou a sugestão se o azul estava vazio."""
+    if key not in EDITABLE_KEYS:
+        return rows
+    out = []
+    for r in rows:
+        x = dict(r)
+        atual = _f(x, key)
+        if lote_val > 0 and abs(atual - lote_val) >= 0.05:
+            out.append(recalc_row_formulas_only(x, taxa))
+            continue
+        x[key] = float(bak.get(int(x["vendedor"]), 0.0))
+        out.append(recalc_row_formulas_only(x, taxa))
+    return out
+
+
 def fill_column_down_rows(
     rows: list[dict],
     col: str,
@@ -581,6 +708,9 @@ def rows_to_editor_df(rows: list[dict]) -> pd.DataFrame:
                 ),
                 "Fat. média": round(_f(r, "faturamento_media_3m"), 0),
                 "Positivação média": round(_f(r, "positivacao_media_3m"), 0),
+                EDITABLE_LABELS["positivacao_meta"]: (
+                    round(_f(r, "positivacao_meta"), 0) or None
+                ),
                 "Ticket histórico": round(_f(r, "ticket_historico"), 0),
                 EDITABLE_LABELS["ticket_meta"]: round(_f(r, "ticket_meta"), 0) or None,
                 "Recorrência média": round(_f(r, "recorrencia_media"), 1),
@@ -649,6 +779,7 @@ def rows_to_aggrid_df(rows: list[dict]) -> pd.DataFrame:
         txp = _f(r, "tx_conv_projetada_pct")
         ticket = _f(r, "ticket_meta")
         rec = _f(r, "recorrencia_meta")
+        pos_man = _f(r, "positivacao_meta")
         conv_ef = valor_efetivo(r, "conv_meta_pct")
         txp_ef = valor_efetivo(r, "tx_conv_projetada_pct")
         tk_ef = ticket_efetivo(r)
@@ -681,6 +812,8 @@ def rows_to_aggrid_df(rows: list[dict]) -> pd.DataFrame:
                 "dif_cob": dif_val,
                 "fat_media": round(_f(r, "faturamento_media_3m"), 0),
                 "pos_media": round(_f(r, "positivacao_media_3m"), 0),
+                "pos_sug": int(_f(r, "pos_sugerido")) or None,
+                "pos": round(pos_man, 0) or None,
                 "ticket_hist": round(_f(r, "ticket_historico"), 0),
                 "ticket": round(ticket, 0) or None,
                 "ticket_sug": round(_f(r, "ticket_sugerido"), 0) or None,
@@ -732,7 +865,12 @@ def meta_final_row(r: dict) -> float:
     return man if man > 0 else _f(r, "meta_prop_mes_rs")
 
 
-def patch_rows_from_editor(prev_rows: list[dict], edited: pd.DataFrame) -> list[dict]:
+def patch_rows_from_editor(
+    prev_rows: list[dict],
+    edited: pd.DataFrame,
+    skip_keys: frozenset[str] | None = None,
+) -> list[dict]:
+    skip = skip_keys or frozenset()
     if "Colaborador" in edited.columns:
         edited = edited[edited["Colaborador"].astype(str).str.upper() != "TOTAL"].reset_index(drop=True)
     out = []
@@ -741,16 +879,23 @@ def patch_rows_from_editor(prev_rows: list[dict], edited: pd.DataFrame) -> list[
         base = dict(prev_rows[i])
         row = edited.iloc[i]
         for key, label in EDITABLE_LABELS.items():
+            if key in skip:
+                continue
             base[key] = _f(row, label)
         out.append(base)
     return out
 
 
-def patch_rows_from_aggrid(prev_rows: list[dict], edited: pd.DataFrame) -> list[dict]:
+def patch_rows_from_aggrid(
+    prev_rows: list[dict],
+    edited: pd.DataFrame,
+    skip_keys: frozenset[str] | None = None,
+) -> list[dict]:
+    skip = skip_keys or frozenset()
     if "colab" in edited.columns:
         edited = edited[edited["colab"].astype(str).str.upper() != "TOTAL"].reset_index(drop=True)
     elif "Colaborador" in edited.columns:
-        return patch_rows_from_editor(prev_rows, edited)
+        return patch_rows_from_editor(prev_rows, edited, skip)
     if "vid" in edited.columns:
         by_vid = {
             int(r["vid"]): r
@@ -763,6 +908,8 @@ def patch_rows_from_aggrid(prev_rows: list[dict], edited: pd.DataFrame) -> list[
             row = by_vid.get(int(prev["vendedor"]))
             if row is not None:
                 for key, field in AGGRID_KEY_TO_FIELD.items():
+                    if key in skip:
+                        continue
                     base[key] = _f(row, field)
             out.append(base)
         return out
@@ -772,14 +919,21 @@ def patch_rows_from_aggrid(prev_rows: list[dict], edited: pd.DataFrame) -> list[
         base = dict(prev_rows[i])
         row = edited.iloc[i]
         for key, field in AGGRID_KEY_TO_FIELD.items():
+            if key in skip:
+                continue
             base[key] = _f(row, field)
         out.append(base)
     return out
 
 
-def rows_from_aggrid_df(prev_rows: list[dict], agdf: pd.DataFrame, taxa: float) -> list[dict]:
+def rows_from_aggrid_df(
+    prev_rows: list[dict],
+    agdf: pd.DataFrame,
+    taxa: float,
+    skip_keys: frozenset[str] | None = None,
+) -> list[dict]:
     if agdf is not None and "colab" in agdf.columns:
-        patched = patch_rows_from_aggrid(prev_rows, agdf)
+        patched = patch_rows_from_aggrid(prev_rows, agdf, skip_keys)
     else:
-        patched = patch_rows_from_editor(prev_rows, agdf)
+        patched = patch_rows_from_editor(prev_rows, agdf, skip_keys)
     return [recalc_row_formulas_only(p, taxa) for p in patched]

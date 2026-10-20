@@ -266,6 +266,28 @@ def load_faturamento_vendedores_janela(inicio: date, fim_exclusive: date) -> pd.
     )
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
+def load_faturamento_diario_trimestre(ano: int, mes: int) -> pd.DataFrame:
+    """Fat. por vendedor e dia nos 3 meses fechados antes de (ano, mes). Uma query só."""
+    from app.dates_util import three_months_prior_bounds
+
+    ini, fim = three_months_prior_bounds(ano, mes)
+    return read_sql(
+        """
+        SELECT
+            vendedor,
+            DATE(data) AS dia,
+            COALESCE(SUM(valor_total_faturado), 0) AS faturamento
+        FROM faturamento_avinor
+        WHERE valor_total_faturado > 0
+          AND data >= %s AND data < %s
+          AND vendedor > 0
+        GROUP BY vendedor, DATE(data)
+        """,
+        (ini.isoformat(), fim.isoformat()),
+    )
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def load_fat_empresa_mensal(anos: tuple[int, ...]) -> dict[tuple[int, int], float]:
     """Faturamento da empresa por (ano, mês) — base do plano anual e da sazonalidade."""

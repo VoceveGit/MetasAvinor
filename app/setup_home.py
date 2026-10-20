@@ -5,9 +5,7 @@ import streamlit as st
 from app.constants import label_mes
 from app.metas_equipe_ui import render_metas_equipe_tabela
 from app.month_meta import select_ano_planejamento, select_mes_planejamento
-from app.plano_metas import mes_editavel
 from app.plano_ui import render_plano_anual
-from app.premissas_ui import render_premissas_vendedores_checklist, render_rotas_upload
 from app.readiness import ReadinessCheck, avaliar_preparacao_mes
 from app.ui import section_header
 
@@ -48,36 +46,21 @@ def render_inicio_preparacao() -> None:
         "2 · Metas do mês",
         "Cada colaborador já vem com a meta automática. Ajuste quem quiser e salve o mês.",
     )
-    c1, c2 = st.columns([1, 2], vertical_alignment="bottom")
-    with c1:
+    c_mes, _ = st.columns([1, 2])
+    with c_mes:
         mes = select_mes_planejamento(
             "inicio_mes",
             label="Mês",
             help_text="Meses fechados ficam só para consulta. O mês atual e os próximos são editáveis.",
             ano=ano,
         )
-    with c2:
-        taxa = st.slider(
-            "TX conversão projetada padrão (%)",
-            50,
-            100,
-            90,
-            1,
-            key="inicio_taxa_pct",
-            help="Usado quando a coluna TX conv. projetada estiver vazia (ex.: 90%).",
-            disabled=not mes_editavel(ano, mes),
-        )
-        taxa = taxa / 100.0
-        st.session_state["inicio_taxa"] = taxa
+    taxa = 0.9
+    st.session_state["inicio_taxa"] = taxa
 
     render_metas_equipe_tabela(ano, mes, taxa)
 
     st.markdown("---")
-    section_header("3 · Rotas e conferência", "Planilha de rotas, premissas em lote e checklist.")
-    with st.expander("Planilha de rotas (oportunidades)", expanded=False):
-        render_rotas_upload(key_prefix=f"cfg_rotas_{ano}_{mes}")
-    with st.expander("Premissas em lote (opcional)", expanded=False):
-        render_premissas_vendedores_checklist(ano, mes, taxa, key_prefix=f"cfg_vend_{ano}_{mes}")
+    section_header("3 · Conferência", "Checklist do mês (ERP + rotas + metas salvas).")
 
     ck_key = _checks_cache_key(ano, mes)
     col_a, col_b = st.columns([1, 2], vertical_alignment="center")

@@ -41,6 +41,27 @@ def business_days_in_month(ano: int, mes: int) -> int:
     return business_days_between(start, end)
 
 
+def semanas_mes(ano: int, mes: int) -> list[tuple[date, date]]:
+    """Semanas (seg–dom) do mês, cortadas nas bordas: [(início, fim exclusivo)]."""
+    ini, fim = month_bounds(ano, mes)
+    out: list[tuple[date, date]] = []
+    d = ini
+    while d < fim:
+        nxt = min(d - timedelta(days=d.weekday()) + timedelta(days=7), fim)
+        out.append((d, nxt))
+        d = nxt
+    return out
+
+
+def semana_do_mes(d: date) -> int:
+    """Índice 0-based da semana do mês que contém d."""
+    semanas = semanas_mes(d.year, d.month)
+    for i, (a, b) in enumerate(semanas):
+        if a <= d < b:
+            return i
+    return max(len(semanas) - 1, 0)
+
+
 def business_days_elapsed_in_month(ano: int, mes: int, ref: date | None = None) -> int:
     ref = ref or date.today()
     start, end = month_bounds(ano, mes)

@@ -21,7 +21,13 @@ from app.equipe_grid_logic import (
     recalc_row_formulas_only,
     rows_from_aggrid_df,
 )
-from app.equipe_grid_ui import render_equipe_grid
+from app.equipe_grid_ui import (
+    lote_keys_ativos,
+    overlay_lotes_ativos,
+    render_equipe_grid,
+    render_guia_secoes,
+)
+from app.ritmo_colab_ui import render_tabelas_ritmo
 from app.formatting import fmt_brl_cell
 from app.grid_snapshot import load_grid_snapshot, save_grid_snapshot, snapshot_token
 from app.meta_proporcional import aplicar_colunas_proporcionais
@@ -53,8 +59,11 @@ _CSS = """
 .metas-previa .p.status.lock{background:#f3f5f4}
 .metas-legenda{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--avinor-muted);margin:.1rem 0 .45rem}
 .metas-legenda i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
-.st-key-equipe_aggrid [data-stale="true"],
-.st-key-equipe_aggrid [data-stale="true"] iframe,
+.metas-guia-nota{font-size:12px;color:var(--avinor-muted);margin:.15rem 0 .35rem}
+[class*="st-key-equipe_aggrid"] [data-stale="true"],
+[class*="st-key-equipe_aggrid"] [data-stale="true"] iframe,
+[class*="st-key-grid_state"] [data-stale="true"],
+[class*="st-key-grid_state"] iframe,
 div[data-testid="stElementContainer"][data-stale="true"]:has(iframe) {
   opacity: 1 !important;
   pointer-events: auto !important;
@@ -290,27 +299,36 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
     st.session_state[state_key] = rows
 
     agdf_prev = st.session_state.get(agdf_key)
-    rows_prev = rows_from_aggrid_df(rows, agdf_prev, taxa) if agdf_prev is not None else rows
+    skip_lote = lote_keys_ativos(state_key)
+    rows_prev = (
+        rows_from_aggrid_df(rows, agdf_prev, taxa, skip_lote)
+        if agdf_prev is not None
+        else rows
+    )
+    if skip_lote:
+        rows_prev = overlay_lotes_ativos(rows_prev, state_key, taxa)
     itens = _inseridos(rows_prev) if editavel else []
 
     salvar = False
     a1, a2, a_limpar, a3, a4 = st.columns([1.3, 1.1, 1, 1, 1.25], vertical_alignment="center")
     with a_limpar:
-        tem_azul = any(_f_num(r, k) > 0 for r in rows_prev for k in EDITABLE_KEYS)
+        tem_azul = any(_f_num(r, k) > 0 for r in rows_prev for k in EDITABLE_KEYS) or any(
+            _f_num(r, f"peso_sem_man_{i}") > 0 for r in rows_prev for i in range(1, 6)
+        )
         if editavel and st.button(
             "Limpar inserções",
             key=f"limpar_{ano}_{mes}",
             icon=":material/ink_eraser:",
             disabled=not tem_azul,
-            help="Esvazia todas as colunas azuis (conversão, TX projetada, ticket, recorrência "
-            "e meta manual). As contas passam a usar as sugestões em dourado e a meta automática. "
-            "Nada é gravado até você clicar em Salvar; Recarregar do ERP volta ao que está salvo.",
+            help="Esvazia as colunas azuis da tabela principal e os pesos manuais da semana. "
+            "As contas passam a usar as sugestões. Nada é gravado até Salvar.",
             use_container_width=True,
         ):
             nonce_key = f"{state_key}_nonce"
             st.session_state[state_key] = limpar_insercoes(rows_prev, taxa)
             st.session_state[nonce_key] = int(st.session_state.get(nonce_key, 0)) + 1
             st.session_state.pop(agdf_key, None)
+            st.session_state.pop(f"{state_key}_semdf", None)
             st.session_state.pop(_escopo_key(ano, mes), None)
             st.session_state["metas_toast"] = (
                 "Colunas azuis limpas: valem as sugestões. Clique em Salvar para gravar."
@@ -344,6 +362,7 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
             use_container_width=True,
         ):
             st.session_state[force_erp_key] = True
+            st.session_state.pop(f"{state_key}_semdf", None)
             st.rerun(scope="fragment")
     with a4:
         if editavel:
@@ -367,10 +386,12 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
         )
         st.markdown(
             '<div class="metas-legenda">'
-            '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>você preenche</span>'
+            '<span><i style="background:#eef4fb;border:1px solid #93c5fd"></i>média 3 meses</span>'
             '<span><i style="background:#fbefc9;border:1px solid #d4a017"></i>'
-            '<b style="color:#9a6b00;font-style:italic">sugestão</b> (vale quando o azul está vazio)</span>'
-            '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>plano anual (automático)</span>'
+            '<b style="color:#9a6b00;font-style:italic">sugerido</b></span>'
+            '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>manual (vazio = sugerido)</span>'
+            '<span><i style="background:#dcfce7;border:1px solid #22c55e"></i>calculado</span>'
+            '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>plano anual</span>'
             '<span><i style="background:#e6f2ea;border:1px solid #3d6b5c"></i>meta que vale</span>'
             f"{extra}</div>",
             unsafe_allow_html=True,
@@ -387,6 +408,14 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
         "base": round(meta_plano_mes(ano, mes), 0),
         "uteis": business_days_in_month(ano, mes),
     }
+    rows = rows_prev
+    st.markdown(
+        '<p class="metas-guia-nota">Os botões <b>dentro da tabela</b> levam na hora até o bloco. '
+        "O número embaixo aplica aquele azul em <b>todos</b>. "
+        "Apague o número para cada um voltar ao que tinha (manual ou sugestão).</p>",
+        unsafe_allow_html=True,
+    )
+    rows = render_guia_secoes(rows, taxa, state_key, locked=not editavel)
     render_equipe_grid(
         rows,
         ano,
@@ -399,8 +428,31 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
     )
 
     agdf = st.session_state.get(agdf_key)
-    rows_live = rows_from_aggrid_df(rows, agdf, taxa) if agdf is not None else rows
+    skip_lote = lote_keys_ativos(state_key)
+    rows_live = (
+        rows_from_aggrid_df(rows, agdf, taxa, skip_lote)
+        if agdf is not None
+        else rows
+    )
+    if skip_lote:
+        rows_live = overlay_lotes_ativos(rows_live, state_key, taxa)
     _render_previa(previa_slot, ano, mes, rows_live, editavel)
+
+    st.markdown("---")
+    st.markdown("#### Ritmo do colaborador · semana e dia")
+    meta_antes = tuple(round(meta_final_row(r), 0) for r in rows_live)
+    rows_live = render_tabelas_ritmo(
+        rows_live, ano, mes, state_key, locked=not editavel
+    )
+    rows_live = [recalc_row_formulas_only(r, taxa) for r in rows_live]
+    rows_live = aplicar_colunas_proporcionais(rows_live, ano, mes)
+    st.session_state[state_key] = rows_live
+    meta_depois = tuple(round(meta_final_row(r), 0) for r in rows_live)
+    if meta_antes != meta_depois:
+        st.session_state[f"{state_key}_nonce"] = int(
+            st.session_state.get(f"{state_key}_nonce", 0)
+        ) + 1
+        st.rerun(scope="fragment")
 
     if salvar:
         if agdf is None:
