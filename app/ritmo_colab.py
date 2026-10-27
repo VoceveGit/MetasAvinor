@@ -5,11 +5,18 @@ from __future__ import annotations
 import pandas as pd
 
 from app.data import load_faturamento_diario_trimestre
-from app.dates_util import business_days_between, semana_do_mes, semanas_mes
+from app.dates_util import (
+    business_days_between,
+    dias_uteis_intervalo,
+    semana_do_mes,
+    semanas_mes,
+)
 from app.equipe_grid_logic import _f, meta_final_row
 
 
 MAX_SEM = 5
+MAX_DIA = 5
+_DIA_NOME = ("Seg", "Ter", "Qua", "Qui", "Sex")
 
 
 def _du_semanas(ano: int, mes: int) -> list[int]:
@@ -219,41 +226,53 @@ def rows_to_semana_df(rows: list[dict], ano: int, mes: int, compensar: bool = Tr
             rec[f"p{i}"] = round(_f(r, f"peso_sem_hab_{i}"), 1) or None
             rec[f"s{i}"] = round(_f(r, f"peso_sem_sug_{i}"), 1) or None
             rec[f"m{i}"] = round(_f(r, f"peso_sem_man_{i}"), 1) or None
+            rec[f"v{i}"] = None
         apl = pesos_aplicados(r, n, compensar)
         for i in range(1, n + 1):
             ef = apl[i - 1]
             rec[f"v{i}"] = round(meta * ef / 100.0, 0) if meta > 0 and ef > 0 else None
         rec["soma"] = round(sum(apl), 1)
         data.append(rec)
-    return pd.DataFrame(data)
+    cols = ["vid", "colab", "origem", "info"]
+    for i in range(1, MAX_SEM + 1):
+        cols.extend([f"h{i}", f"p{i}", f"s{i}", f"m{i}", f"v{i}"])
+    cols.extend(["soma", "meta_mes"])
+    return pd.DataFrame(data, columns=cols)
 
 
-def rows_to_dia_df(rows: list[dict], ano: int, mes: int, compensar: bool = True) -> pd.DataFrame:
+def rows_to_dia_df(
+    rows: list[dict],
+    ano: int,
+    mes: int,
+    compensar: bool = True,
+    sem_i: int = 1,
+) -> pd.DataFrame:
+    """Uma semana: colaborador, meta da semana, R$ em cada dia útil."""
     semanas = semanas_mes(ano, mes)
     n = len(semanas)
+    idx = max(1, min(int(sem_i), n)) - 1
+    a, b = semanas[idx]
+    dias = dias_uteis_intervalo(a, b)
+    du = max(len(dias), 0)
     data = []
     for r in rows:
         vid = int(r["vendedor"])
         meta = meta_final_row(r)
+        apl = pesos_aplicados(r, n, compensar)
+        ef = apl[idx] if idx < len(apl) else 0.0
+        msem = meta * ef / 100.0 if meta > 0 and ef > 0 else 0.0
         rec = {
             "vid": vid,
             "colab": f"{vid:03d} · {str(r['nome'])[:44]}",
+            "meta_sem": round(msem, 0) or None,
             "meta_mes": round(meta, 0) or None,
         }
-        apl = pesos_aplicados(r, n, compensar)
-        for i, (a, b) in enumerate(semanas, start=1):
-            du = max(business_days_between(a, b), 0)
-            ef = apl[i - 1]
-            msem = meta * ef / 100.0 if meta > 0 and ef > 0 else 0.0
-            rec[f"du{i}"] = du or None
-            rec[f"ms{i}"] = round(msem, 0) or None
-            rec[f"dia{i}"] = round(msem / du, 0) if du > 0 and msem > 0 else None
-        for i in range(n + 1, MAX_SEM + 1):
-            rec[f"du{i}"] = None
-            rec[f"ms{i}"] = None
-            rec[f"dia{i}"] = None
+        dia_rs = round(msem / du, 0) if du > 0 and msem > 0 else None
+        for j in range(1, MAX_DIA + 1):
+            rec[f"d{j}"] = dia_rs if j <= du else None
         data.append(rec)
-    return pd.DataFrame(data)
+    cols = ["vid", "colab", "meta_sem", "meta_mes"] + [f"d{j}" for j in range(1, MAX_DIA + 1)]
+    return pd.DataFrame(data, columns=cols)
 
 
 def patch_pesos_from_aggrid(rows: list[dict], agdf: pd.DataFrame | None) -> list[dict]:
@@ -279,12 +298,11 @@ def patch_pesos_from_aggrid(rows: list[dict], agdf: pd.DataFrame | None) -> list
 def total_ritmo_row(df: pd.DataFrame) -> dict:
     """Linha TOTAL: soma R$ (meta do mês, médias, metas da semana/dia)."""
     rec: dict = {"vid": None, "colab": "TOTAL", "origem": "", "info": ""}
-    money = {"meta_mes"}
+    money = {"meta_mes", "meta_sem"}
     money.update({f"h{i}" for i in range(1, MAX_SEM + 1)})
     money.update({f"v{i}" for i in range(1, MAX_SEM + 1)})
-    money.update({f"ms{i}" for i in range(1, MAX_SEM + 1)})
-    money.update({f"dia{i}" for i in range(1, MAX_SEM + 1)})
-    ints = {f"du{i}" for i in range(1, MAX_SEM + 1)}
+    money.update({f"d{j}" for j in range(1, MAX_DIA + 1)})
+    ints: set[str] = set()
     skip = {"vid", "colab", "origem", "info", "soma"}
     skip.update({f"p{i}" for i in range(1, MAX_SEM + 1)})
     skip.update({f"s{i}" for i in range(1, MAX_SEM + 1)})
@@ -311,5 +329,27 @@ def semana_labels(ano: int, mes: int) -> list[str]:
     labs = []
     for i, (a, b) in enumerate(semanas_mes(ano, mes), start=1):
         fim = _date.fromordinal(b.toordinal() - 1)
-        labs.append(f"S{i} {a:%d}–{fim:%d}")
+        labs.append(f"Semana {i} ({a:%d} a {fim:%d})")
     return labs
+
+
+def semana_dias_cabecalhos(ano: int, mes: int, sem_i: int) -> list[str]:
+    """Rótulos Seg 05, Ter 06… da semana sem_i (1-based)."""
+    semanas = semanas_mes(ano, mes)
+    if not semanas:
+        return []
+    idx = max(1, min(int(sem_i), len(semanas))) - 1
+    a, b = semanas[idx]
+    labs = []
+    for d in dias_uteis_intervalo(a, b):
+        nome = _DIA_NOME[d.weekday()] if d.weekday() < 5 else d.strftime("%a")
+        labs.append(f"{nome} {d:%d}")
+    return labs
+
+
+def peso_medio_semana(rows: list[dict], n: int, sem_i: int, compensar: bool) -> float:
+    if not rows:
+        return 0.0
+    i = max(1, min(int(sem_i), n)) - 1
+    xs = [pesos_aplicados(r, n, compensar)[i] for r in rows]
+    return float(sum(xs) / len(xs)) if xs else 0.0

@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import html as html_lib
 import json
 
 import pandas as pd
 import streamlit as st
 
-from app.dates_util import semanas_mes
+from app.constants import MESES_CURTO
+from app.dates_util import dias_uteis_intervalo, semanas_mes
 from app.ritmo_colab import (
     MAX_SEM,
     aplicar_ritmo_sugerido,
     patch_pesos_from_aggrid,
+    peso_medio_semana,
     pesos_aplicados,
     rows_to_dia_df,
     rows_to_semana_df,
@@ -83,7 +86,7 @@ _FINAL = {
     "color": "#14532d",
     "fontWeight": "700",
 }
-_SEC = ("h1", "h2", "h3", "h4", "h5", "dia1", "dia2", "dia3", "dia4", "dia5")
+_SEC = ("h1", "h2", "h3", "h4", "h5", "d1")
 
 
 def _js_sug_pct():
@@ -383,7 +386,7 @@ def _try_grid(
         """
     )
     gb.configure_grid_options(
-        headerHeight=56,
+        headerHeight=68,
         rowHeight=34,
         singleClickEdit=True,
         stopEditingWhenCellsLoseFocus=True,
@@ -457,12 +460,12 @@ def _build_semana(gb, locked: bool, n: int, labs: list[str]) -> None:
     )
     for i in range(1, MAX_SEM + 1):
         hide = i > n
-        lab = labs[i - 1] if i <= n else f"S{i}"
+        lab = labs[i - 1] if i <= n else f"Semana {i}"
         gb.configure_column(
             f"h{i}",
-            headerName=f"{lab} média",
-            width=118,
-            minWidth=110,
+            headerName=f"{lab}\nMédia",
+            width=124,
+            minWidth=114,
             hide=hide,
             editable=False,
             cellStyle=_HIST,
@@ -473,9 +476,9 @@ def _build_semana(gb, locked: bool, n: int, labs: list[str]) -> None:
         )
         gb.configure_column(
             f"p{i}",
-            headerName=f"{lab} hab.",
-            width=96,
-            minWidth=88,
+            headerName=f"{lab}\nHabitual %",
+            width=110,
+            minWidth=100,
             hide=hide,
             editable=False,
             cellStyle=_HIST,
@@ -486,9 +489,9 @@ def _build_semana(gb, locked: bool, n: int, labs: list[str]) -> None:
         )
         gb.configure_column(
             f"s{i}",
-            headerName=f"{lab} evo.",
-            width=100,
-            minWidth=92,
+            headerName=f"{lab}\nEvolução %",
+            width=110,
+            minWidth=100,
             hide=hide,
             editable=False,
             cellStyle=_GOLD,
@@ -499,30 +502,30 @@ def _build_semana(gb, locked: bool, n: int, labs: list[str]) -> None:
         )
         gb.configure_column(
             f"m{i}",
-            headerName=f"{lab} man.",
-            width=108,
-            minWidth=100,
+            headerName=f"{lab}\nManual %",
+            width=114,
+            minWidth=104,
             hide=hide,
             editable=not locked,
             cellStyle=sug_st if not locked else _BLUE,
             valueFormatter=fmt_sug,
             valueParser=parse,
             type=["numericColumn"],
-            headerTooltip="Você concorda com a evolução ou põe outro %. Vazio = vale o dourado.",
+            headerTooltip="Digite o % desta semana. Ao lado, o R$ atualiza na hora. Vazio = vale a evolução.",
             suppressSizeToFit=True,
         )
         gb.configure_column(
             f"v{i}",
-            headerName=f"{lab} meta",
-            width=118,
-            minWidth=110,
+            headerName=f"{lab}\nMeta R$",
+            width=124,
+            minWidth=114,
             hide=hide,
             editable=False,
             cellStyle=_CALC,
             valueFormatter=fmt_brl,
             valueGetter=_js_meta_w(i),
             type=["numericColumn"],
-            headerTooltip="Meta do mês × peso que vale.",
+            headerTooltip="R$ desta semana: meta do mês × o % que vale. Atualiza quando você muda o manual.",
             suppressSizeToFit=True,
         )
     gb.configure_column(
@@ -542,74 +545,194 @@ def _build_semana(gb, locked: bool, n: int, labs: list[str]) -> None:
     )
 
 
-def _build_dia(gb, locked: bool, n: int, labs: list[str]) -> None:
-    del locked
-    fmt_brl = _fmt_brl()
-    gb.configure_column("vid", hide=True)
-    gb.configure_column(
-        "colab",
-        headerName="Colaborador",
-        pinned="left",
-        width=200,
-        minWidth=180,
-        editable=False,
-        suppressSizeToFit=True,
+def _fmt_rs_html(v) -> str:
+    if v is None or (isinstance(v, float) and pd.isna(v)) or float(v or 0) == 0:
+        return "—"
+    return "R$ " + f"{int(round(float(v))):,}".replace(",", ".")
+
+
+def _nome_card(r: dict) -> str:
+    nome = str(r.get("nome") or "").strip()
+    first = nome.split()[0] if nome else str(int(r["vendedor"]))
+    return html_lib.escape(first.upper())
+
+
+def _render_dia_visual(
+    rows: list[dict],
+    ano: int,
+    mes: int,
+    sem_i: int,
+    compensar: bool,
+    n: int,
+    labs: list[str],
+    wk_key: str,
+) -> None:
+    """Visual do dia: chips S1–S5 + grade da semana escolhida."""
+    semanas = semanas_mes(ano, mes)
+    idx = max(1, min(int(sem_i), n)) - 1
+    a, b = semanas[idx]
+    dias = dias_uteis_intervalo(a, b)
+    du = len(dias)
+    pct_dia = (100.0 / du) if du else 0.0
+    mes_abrev = MESES_CURTO.get(mes, "").lower()
+    if dias:
+        ini, fim = dias[0], dias[-1]
+        periodo = f"{ini.day:02d}–{fim.day:02d}/{mes_abrev}"
+    else:
+        periodo = labs[idx] if idx < len(labs) else ""
+    pct_sel = peso_medio_semana(rows, n, idx + 1, compensar)
+    wd = ("Seg", "Ter", "Qua", "Qui", "Sex")
+
+    st.markdown(
+        f"""
+<style>
+div[class*="st-key-{wk_key}_b"] button {{
+  border-radius: 10px !important;
+  min-height: 58px !important;
+  white-space: pre-line !important;
+}}
+</style>
+""",
+        unsafe_allow_html=True,
     )
-    gb.configure_column(
-        "meta_mes",
-        headerName="Meta do mês",
-        width=124,
-        minWidth=118,
-        editable=False,
-        pinned="right",
-        lockPinned=True,
-        cellStyle=_FINAL,
-        valueFormatter=fmt_brl,
-        type=["numericColumn"],
-        suppressSizeToFit=True,
-        headerTooltip="Meta do mês que vale. Acompanhe aqui se o ritmo da semana alterar o mês.",
-    )
-    for i in range(1, MAX_SEM + 1):
-        hide = i > n
-        lab = labs[i - 1] if i <= n else f"S{i}"
-        gb.configure_column(
-            f"du{i}",
-            headerName=f"{lab} du",
-            width=88,
-            minWidth=80,
-            hide=hide,
-            editable=False,
-            cellStyle=_HIST,
-            type=["numericColumn"],
-            headerTooltip="Dias úteis (seg–sex) desta semana no mês.",
-            suppressSizeToFit=True,
+    nav = st.columns(n)
+    for i in range(n):
+        pct = peso_medio_semana(rows, n, i + 1, compensar)
+        with nav[i]:
+            if st.button(
+                f"S{i + 1}\n{pct:.0f}% do mês",
+                key=f"{wk_key}_b{i + 1}",
+                use_container_width=True,
+                type="primary" if i == idx else "secondary",
+                help=labs[i] if i < len(labs) else f"Semana {i + 1}",
+            ):
+                st.session_state[wk_key] = i + 1
+                st.rerun(scope="fragment")
+
+    head_dias = []
+    for d in dias:
+        nome_d = wd[d.weekday()] if d.weekday() < 5 else d.strftime("%a")
+        head_dias.append(
+            f'<th><div class="dn-d">{html_lib.escape(nome_d)} {d.day:02d}</div>'
+            f'<div class="dn-p">{pct_dia:.0f}%</div></th>'
         )
-        gb.configure_column(
-            f"ms{i}",
-            headerName=f"{lab} meta sem.",
-            width=118,
-            minWidth=110,
-            hide=hide,
-            editable=False,
-            cellStyle=_GOLD,
-            valueFormatter=fmt_brl,
-            type=["numericColumn"],
-            headerTooltip="Espelho da tabela semanal: meta do mês × peso que vale.",
-            suppressSizeToFit=True,
-        )
-        gb.configure_column(
-            f"dia{i}",
-            headerName=f"{lab} R$/du",
-            width=118,
-            minWidth=110,
-            hide=hide,
-            editable=False,
-            cellStyle=_CALC,
-            valueFormatter=fmt_brl,
-            type=["numericColumn"],
-            headerTooltip="Meta da semana ÷ dias úteis da semana.",
-            suppressSizeToFit=True,
-        )
+
+    ddf = rows_to_dia_df(rows, ano, mes, compensar, sem_i=idx + 1)
+    body = []
+    for _, rec in ddf.iterrows():
+        if str(rec.get("colab", "")).upper() == "TOTAL":
+            continue
+        vid = int(rec["vid"])
+        row = next((r for r in rows if int(r["vendedor"]) == vid), None)
+        nome = _nome_card(row) if row else html_lib.escape(str(rec["colab"]))
+        msem = rec.get("meta_sem")
+        cells = [
+            f'<td class="dn-nome">{nome}'
+            f'<div class="dn-sem">{_fmt_rs_html(msem)}</div></td>'
+        ]
+        for j in range(1, du + 1):
+            cells.append(f'<td class="dn-rs">{_fmt_rs_html(rec.get(f"d{j}"))}</td>')
+        body.append("<tr>" + "".join(cells) + "</tr>")
+
+    html = f"""
+<style>
+.dn-wrap {{
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  overflow: auto;
+  max-height: 560px;
+  margin: 4px 0 18px 0;
+}}
+.dn-head {{
+  margin: 10px 12px 0 12px;
+  background: #ecfdf5;
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}}
+.dn-head h3 {{
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: .04em;
+  color: #064e3b;
+}}
+.dn-head .dn-sub {{ color: #047857; font-size: 14px; }}
+.dn-head .dn-pct {{
+  font-size: 28px;
+  font-weight: 700;
+  color: #065f46;
+}}
+.dn-tbl {{
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}}
+.dn-tbl th {{
+  font-weight: 600;
+  color: #6b7280;
+  font-size: 13px;
+  padding: 10px 8px 8px 8px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: center;
+  position: sticky;
+  top: 72px;
+  background: #fff;
+  z-index: 1;
+}}
+.dn-tbl th.dn-h-nome {{ text-align: left; padding-left: 18px; width: 140px; }}
+.dn-d {{ font-size: 13px; color: #374151; }}
+.dn-p {{ font-size: 12px; color: #9ca3af; font-weight: 500; }}
+.dn-tbl td {{
+  padding: 12px 8px;
+  border-bottom: 1px solid #f3f4f6;
+  text-align: center;
+  font-size: 14px;
+  color: #111827;
+}}
+.dn-nome {{
+  text-align: left !important;
+  padding-left: 18px !important;
+  font-weight: 700;
+  letter-spacing: .02em;
+}}
+.dn-sem {{
+  font-weight: 600;
+  color: #059669;
+  font-size: 13px;
+  margin-top: 2px;
+}}
+.dn-rs {{ white-space: nowrap; }}
+</style>
+<div class="dn-wrap">
+  <div class="dn-head">
+    <div>
+      <h3>SEMANA {idx + 1}</h3>
+      <div class="dn-sub">{html_lib.escape(periodo)}</div>
+    </div>
+    <div class="dn-pct">{pct_sel:.0f}% <span style="font-size:14px;font-weight:500">da meta mensal</span></div>
+  </div>
+  <table class="dn-tbl">
+    <thead>
+      <tr>
+        <th class="dn-h-nome"></th>
+        {''.join(head_dias)}
+      </tr>
+    </thead>
+    <tbody>
+      {''.join(body) if body else '<tr><td colspan="6">Sem colaboradores nesta equipe.</td></tr>'}
+    </tbody>
+  </table>
+</div>
+"""
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_tabelas_ritmo(
@@ -642,16 +765,12 @@ def render_tabelas_ritmo(
         )
     with c2:
         st.caption(
-            "**Hab.** = fatia que ele costuma fazer nessa semana. "
-            "**Evo.** = habitual × 1,05 (dourado). "
-            "**Man.** vazio = vale a evolução. "
-            "O dia só reparte a meta da semana nos dias úteis."
+            "Em cada semana: média, % habitual, evolução, **manual %** e **meta R$** ao lado. "
+            "Vazio no manual = vale a evolução. "
+            "Embaixo, escolha a semana para ver o R$ de cada dia útil."
         )
     guia_sem = [
         {"label": f"S{i + 1}", "jump": f"h{i + 1}", "title": labs[i]} for i in range(n)
-    ]
-    guia_dia = [
-        {"label": f"S{i + 1}", "jump": f"du{i + 1}", "title": labs[i]} for i in range(n)
     ]
     st.markdown("##### Distribuição por semana")
     sdf = rows_to_semana_df(rows, ano, mes, compensar)
@@ -682,16 +801,14 @@ def render_tabelas_ritmo(
                 + ("…" if len(apl_fora) > 12 else "")
                 + "). Isso altera a meta do mês desse colaborador."
             )
-    st.markdown("##### Distribuição por dia útil (espelho da semana)")
-    ddf = rows_to_dia_df(rows, ano, mes, compensar)
-    _try_grid(
-        ddf,
-        420,
-        f"{state_key}_dia{nonce or ''}_pin",
-        lambda gb, lk: _build_dia(gb, lk, n, labs),
-        True,
-        compensar=compensar,
-        n_sem=n,
-        guia_items=guia_dia,
-    )
+    st.markdown("##### Meta por dia útil")
+    wk_key = f"{state_key}_dia_sem"
+    if wk_key not in st.session_state:
+        st.session_state[wk_key] = 1
+    st.caption("Escolha a semana. Só entram os dias úteis; o R$ da semana se reparte igualmente entre eles.")
+    sem_i = int(st.session_state[wk_key])
+    if sem_i < 1 or sem_i > n:
+        sem_i = 1
+        st.session_state[wk_key] = 1
+    _render_dia_visual(rows, ano, mes, sem_i, compensar, n, labs, wk_key)
     return rows

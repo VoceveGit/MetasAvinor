@@ -41,6 +41,17 @@ def business_days_in_month(ano: int, mes: int) -> int:
     return business_days_between(start, end)
 
 
+def dias_uteis_intervalo(inicio: date, fim_exclusive: date) -> list[date]:
+    """Dias úteis (seg–sex) em [inicio, fim_exclusive)."""
+    out: list[date] = []
+    d = inicio
+    while d < fim_exclusive:
+        if d.weekday() < 5:
+            out.append(d)
+        d += timedelta(days=1)
+    return out
+
+
 def semanas_mes(ano: int, mes: int) -> list[tuple[date, date]]:
     """Semanas (seg–dom) do mês, cortadas nas bordas: [(início, fim exclusivo)]."""
     ini, fim = month_bounds(ano, mes)

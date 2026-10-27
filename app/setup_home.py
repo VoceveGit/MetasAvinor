@@ -44,7 +44,8 @@ def render_inicio_preparacao() -> None:
     st.markdown("---")
     section_header(
         "2 · Metas do mês",
-        "Cada colaborador já vem com a meta automática. Ajuste quem quiser e salve o mês.",
+        "A meta do mês já vem do quanto cada um entrega (histórico + alavancas). "
+        "A cota do plano fica ao lado, para comparar com o anual.",
     )
     c_mes, _ = st.columns([1, 2])
     with c_mes:

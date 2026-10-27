@@ -183,7 +183,8 @@ def _salvar_mes(ano: int, mes: int, rows_live: list[dict]) -> int:
         vid = int(r["vendedor"])
         auto = float(r.get("meta_prop_mes_rs") or 0)
         man = float(r.get("meta_manual") or 0)
-        colab[vid] = (auto, man if man > 0 else auto)
+        final = meta_final_row(r)
+        colab[vid] = (auto, final if final > 0 else auto)
         if auto > 0 and man > 0 and abs(man - auto) >= 1:
             ajustes[vid] = (man / auto - 1.0, escopos.get(vid, ESCOPO_DIANTE))
     save_mes(ano, mes, colab, ajustes)
@@ -205,10 +206,13 @@ def _render_previa(
 
     salvo = mes_salvo(ano, mes)
     dif_mes = final - auto
-    s_mes = f"automática {mi(auto)}"
+    s_mes = f"cota do plano {mi(auto)}"
     if abs(dif_mes) >= 1_000:
         cls = "up" if dif_mes > 0 else "down"
-        s_mes += f' · <b class="{cls}">{"+" if dif_mes > 0 else "−"}{mi(abs(dif_mes))}</b> de ajustes'
+        s_mes += (
+            f' · <b class="{cls}">{"+" if dif_mes > 0 else "−"}{mi(abs(dif_mes))}</b> '
+            "vs a cota (quanto entrega / manuais)"
+        )
     dif_ano = ano_total - meta_anual
     s_ano = f"plano {mi(meta_anual)}"
     if meta_anual > 0 and abs(dif_ano) >= 1_000:
@@ -241,7 +245,7 @@ def _render_previa(
             "pend",
             "Ainda não salvo",
             "Valores calculados",
-            "O painel usa o automático até você salvar.",
+            "O painel usa a cota do plano até você salvar. A meta do mês já mostra o quanto cada um entrega.",
         )
 
     slot.markdown(
@@ -388,10 +392,10 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
             '<div class="metas-legenda">'
             '<span><i style="background:#eef4fb;border:1px solid #93c5fd"></i>média 3 meses</span>'
             '<span><i style="background:#fbefc9;border:1px solid #d4a017"></i>'
-            '<b style="color:#9a6b00;font-style:italic">sugerido</b></span>'
-            '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>manual (vazio = sugerido)</span>'
+            '<b style="color:#9a6b00;font-style:italic">alavancas / quanto entrega</b></span>'
+            '<span><i style="background:#e8f0fe;border:1px solid #93c5fd"></i>manual (vazio = quanto entrega)</span>'
             '<span><i style="background:#dcfce7;border:1px solid #22c55e"></i>calculado</span>'
-            '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>plano anual</span>'
+            '<span><i style="background:#fef9c3;border:1px solid #facc15"></i>cota do plano</span>'
             '<span><i style="background:#e6f2ea;border:1px solid #3d6b5c"></i>meta que vale</span>'
             f"{extra}</div>",
             unsafe_allow_html=True,
@@ -410,9 +414,12 @@ def render_metas_equipe_tabela(ano: int, mes: int, taxa: float) -> None:
     }
     rows = rows_prev
     st.markdown(
-        '<p class="metas-guia-nota">Os botões <b>dentro da tabela</b> levam na hora até o bloco. '
-        "O número embaixo aplica aquele azul em <b>todos</b>. "
-        "Apague o número para cada um voltar ao que tinha (manual ou sugestão).</p>",
+        '<p class="metas-guia-nota">'
+        "<b>Cota do plano</b> = fatia dele no anual deste mês. "
+        "<b>Quanto entrega</b> = conta do histórico/alavancas (pode ser menos ou mais que a cota). "
+        "<b>Meta do mês</b> = o manual, se houver; senão o quanto ele entrega. "
+        "Os botões dentro da tabela levam ao bloco; o número embaixo aplica o azul em todos."
+        "</p>",
         unsafe_allow_html=True,
     )
     rows = render_guia_secoes(rows, taxa, state_key, locked=not editavel)

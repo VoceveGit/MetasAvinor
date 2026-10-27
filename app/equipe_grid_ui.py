@@ -98,12 +98,12 @@ _HEADER_HELP = {
     ),
     "ticket": "Você define o ticket do mês. Vazio = vale o sugerido.",
     "fat_media": "Faturamento médio nos 3 meses fechados.",
-    "meta_calc": "Ticket × recorrência × cobertura (valores que valem: manual ou sugestão).",
-    "meta_man": "Você define o faturamento do mês. Vazio = vale o sugerido desta conta (e a meta automática do plano, se não houver manual).",
-    "peso_3m": "Faturamento dele ÷ faturamento da equipe nos 3 meses fechados.",
-    "meta_prop": "Meta da empresa no mês × peso (plano anual).",
-    "ajuste": "Meta do mês ÷ meta automática − 1.",
-    "meta_final": "A meta que vale: faturamento manual, se houver; senão a automática do plano.",
+    "meta_calc": "Quanto ele entrega com o histórico e as alavancas: ticket × recorrência × cobertura. Pode ser menos ou mais que a cota do plano.",
+    "meta_man": "Você impõe o número. Vazio = a meta do mês usa o quanto ele entrega.",
+    "peso_3m": "Faturamento dele ÷ faturamento da equipe nos 3 meses fechados. Serve para calcular a cota do plano.",
+    "meta_prop": "Fatia dele no alvo da empresa neste mês (anual → mês × peso 3m). É a cota, não o que se cobra se as alavancas disserem outra coisa.",
+    "ajuste": "Meta do mês ÷ cota do plano − 1. Negativo = cobra menos que a fatia crua do anual.",
+    "meta_final": "O que vale: o manual, se houver; senão o quanto ele entrega. A cota do plano fica só como referência.",
     "realizado": "Faturado no mês até agora.",
 }
 _TOTAL_ROW = {
@@ -392,7 +392,7 @@ def _js_grid_ready(quiet: bool = False):
             window.__avinorGrid = window.__avinorGrid || {};
             var g = window.__avinorGrid;
             g.quiet = __QUIET__;
-            if (g._ready !== 'v9') {
+            if (g._ready !== 'v10') {
             g.n = function(v) {
                 var x = Number(v);
                 return isNaN(x) ? 0 : x;
@@ -450,13 +450,16 @@ def _js_grid_ready(quiet: bool = False):
             g.rowFinal = function(d) {
                 if (!d) return null;
                 if (g.isSet(d.meta_man) && g.n(d.meta_man) > 0) return g.n(d.meta_man);
+                var cap = g.rowMetaCalc(d);
+                if (cap !== null && cap > 0) return cap;
                 return g.isSet(d.meta_prop) ? g.n(d.meta_prop) : null;
             };
             g.rowAjuste = function(d) {
-                if (!d || !g.isSet(d.meta_man) || g.n(d.meta_man) <= 0) return null;
+                if (!d) return null;
+                var fin = g.rowFinal(d);
                 var auto = g.n(d.meta_prop);
-                if (auto <= 0) return null;
-                return Math.round((g.n(d.meta_man) / auto - 1) * 1000) / 10;
+                if (fin === null || auto <= 0) return null;
+                return Math.round((fin / auto - 1) * 1000) / 10;
             };
             g.refreshPinned = function(api) {
                 var bottom = [];
@@ -562,7 +565,7 @@ def _js_grid_ready(quiet: bool = False):
                 }]);
                 g.refreshPinned(api);
             };
-            g._ready = 'v9';
+            g._ready = 'v10';
             }
             """
         + _js_guia_install()
@@ -626,8 +629,8 @@ def _js_tooltip(ctx: dict):
                 if (f === 'tx_oport') return 'Equipe: notas ÷ oportunidades = ' + br(d.pos_media) + ' ÷ ' + br(d.oport) + ' = ' + pc(d.tx_oport) + '.';
                 if (f === 'tx_cob_hist') return 'Equipe: cobertura média ÷ carteira = ' + br(d.cob_media) + ' ÷ ' + br(d.cart) + ' = ' + pc(d.tx_cob_hist) + '.';
                 if (f === 'conv' || f === 'tx_proj') return 'Média dos valores que valem: o digitado ou, se vazio, a sugestão.';
-                if (f === 'meta_final') return 'Meta do mês da equipe: ' + rs(d.meta_final) + '. Soma das metas de cada um (manual, se houver; senão automática).';
-                if (f === 'ajuste') return 'Equipe: soma das metas do mês ÷ soma das automáticas − 1 = ' + pc(d.ajuste) + '.';
+                if (f === 'meta_final') return 'Meta do mês da equipe: ' + rs(d.meta_final) + '. Soma do que vale em cada um (manual ou quanto entrega).';
+                if (f === 'ajuste') return 'Equipe: soma das metas do mês ÷ soma das cotas do plano − 1 = ' + pc(d.ajuste) + '.';
                 return 'Total da equipe: soma das linhas.';
             }
             var g = window.__avinorGrid || {};
@@ -689,29 +692,29 @@ def _js_tooltip(ctx: dict):
             case 'meta_calc':
                 var tkE = set(d.ticket) ? d.ticket : d.ticket_sug;
                 var rcE = set(d.rec) ? d.rec : d.rec_sug;
-                if (cob === null || !set(tkE) || !set(rcE)) return 'Sem histórico suficiente para calcular.';
+                if (cob === null || !set(tkE) || !set(rcE)) return 'Sem histórico suficiente para calcular o quanto ele entrega.';
                 var usaSug = !set(d.ticket) || !set(d.rec) || !set(d.tx_proj);
-                return 'Ticket × recorrência × cobertura = ' + rs(tkE) + ' × ' + br(rcE, 1) + ' × ' + br(cob) + ' = ' + rs(n(tkE) * n(rcE) * cob) + '.' + (usaSug ? ' Campos azuis vazios usam a sugestão (dourado).' : ' Sai das alavancas azuis.');
+                return 'Quanto entrega (alavancas): ticket × recorrência × cobertura = ' + rs(tkE) + ' × ' + br(rcE, 1) + ' × ' + br(cob) + ' = ' + rs(n(tkE) * n(rcE) * cob) + '. Pode ser menos ou mais que a cota do plano (' + rs(d.meta_prop) + ').' + (usaSug ? ' Azul vazio usa o dourado.' : '');
             case 'peso_3m':
-                return 'Faturamento dele ÷ faturamento da equipe nos 3 meses fechados = ' + pc(d.peso_3m, 2) + '. É a fatia dele na meta da empresa.';
+                return 'Faturamento dele ÷ faturamento da equipe nos 3 meses fechados = ' + pc(d.peso_3m, 2) + '. Monta a cota dele no alvo da empresa.';
             case 'meta_prop':
-                return 'Meta da empresa em ' + C.mes + ' × peso = ' + rs(C.base) + ' × ' + pc(d.peso_3m, 2) + ' = ' + rs(d.meta_prop) + '. Sai direto da meta anual.';
+                return 'Cota do plano: meta da empresa em ' + C.mes + ' × peso = ' + rs(C.base) + ' × ' + pc(d.peso_3m, 2) + ' = ' + rs(d.meta_prop) + '. É a fatia crua do anual, não o que se cobra se as alavancas disserem outra coisa.';
             case 'meta_man':
-                if (!set(d.meta_man) || n(d.meta_man) <= 0) return 'Vazio = vale a automática (' + rs(d.meta_prop) + '). Se preencher, o sistema guarda a diferença em %.';
-                return 'Meta manual ' + rs(d.meta_man) + ' contra a automática ' + rs(d.meta_prop) + (adj !== null ? ' (' + (adj > 0 ? '+' : '') + pc(adj) + ').' : '.') + (d.aj_info ? ' ' + d.aj_info : '');
+                if (!set(d.meta_man) || n(d.meta_man) <= 0) return 'Vazio: a meta do mês usa o quanto ele entrega (alavancas). Digite para impor outro valor.';
+                return 'Manual ' + rs(d.meta_man) + ' contra a cota do plano ' + rs(d.meta_prop) + (adj !== null ? ' (' + (adj > 0 ? '+' : '') + pc(adj) + ').' : '.') + (d.aj_info ? ' ' + d.aj_info : '');
             case 'ajuste':
-                if (adj === null) return 'Sem ajuste: vale a meta automática.';
-                return 'Meta do mês ÷ automática − 1 = ' + rs(fin) + ' ÷ ' + rs(d.meta_prop) + ' − 1 = ' + (adj > 0 ? '+' : '') + pc(adj) + '.' + (d.aj_info ? ' ' + d.aj_info : '');
+                if (fin === null || !n(d.meta_prop)) return 'Sem cota do plano para comparar.';
+                return 'Meta do mês ÷ cota do plano − 1 = ' + rs(fin) + ' ÷ ' + rs(d.meta_prop) + ' − 1 = ' + (adj > 0 ? '+' : '') + pc(adj) + '.' + (d.aj_info ? ' ' + d.aj_info : '');
             case 'meta_final':
-                if (adj === null) return 'Sem ajuste manual: vale a automática, ' + rs(fin) + '.';
-                return 'Vale a manual: ' + rs(fin) + ' (' + (adj > 0 ? '+' : '') + pc(adj) + ' sobre a automática ' + rs(d.meta_prop) + ').';
+                if (set(d.meta_man) && n(d.meta_man) > 0) return 'Vale o manual: ' + rs(fin) + ' (cota do plano ' + rs(d.meta_prop) + ').';
+                return 'Vale o quanto ele entrega (alavancas): ' + rs(fin) + '. Cota do plano: ' + rs(d.meta_prop) + '.';
             case 'realizado':
                 if (fin && fin > 0) return 'Faturado no mês: ' + rs(d.realizado) + ' = ' + pc(n(d.realizado) / fin * 100, 0) + ' da meta do mês (' + rs(fin) + ').';
                 return 'Faturado no mês: ' + rs(d.realizado) + '.';
             case 'meta_prop_sem':
-                return 'Meta automática ÷ dias úteis × 5 = ' + rs(d.meta_prop) + ' ÷ ' + C.uteis + ' × 5 = ' + rs(d.meta_prop_sem) + ' por semana.';
+                return 'Cota do plano ÷ dias úteis × 5 = ' + rs(d.meta_prop) + ' ÷ ' + C.uteis + ' × 5 = ' + rs(d.meta_prop_sem) + ' por semana.';
             case 'meta_prop_dia':
-                return 'Meta automática ÷ dias úteis = ' + rs(d.meta_prop) + ' ÷ ' + C.uteis + ' = ' + rs(d.meta_prop_dia) + ' por dia útil.';
+                return 'Cota do plano ÷ dias úteis = ' + rs(d.meta_prop) + ' ÷ ' + C.uteis + ' = ' + rs(d.meta_prop_dia) + ' por dia útil.';
             case 'pos_prop':
                 return br(d.pos_prop) + ' notas para bater a meta automática: ' + br(d.cob_prop) + ' clientes × recorrência.';
             case 'cob_prop':
@@ -980,14 +983,19 @@ def _try_aggrid(
         function(params) {
             var d = params.data;
             if (!d) return null;
+            var g = window.__avinorGrid;
+            if (g && g.rowFinal) {
+                var fv = g.rowFinal(d);
+                return fv === null ? null : Math.round(fv);
+            }
             var man = Number(d.meta_man);
             if (d.meta_man !== null && d.meta_man !== undefined && d.meta_man !== '' && !isNaN(man) && man > 0) {
                 return Math.round(man);
             }
+            var cap = Number(d.meta_calc);
+            if (!isNaN(cap) && cap > 0) return Math.round(cap);
             var auto = Number(d.meta_prop);
-            if (d.meta_prop !== null && d.meta_prop !== undefined && d.meta_prop !== '' && !isNaN(auto) && auto > 0) {
-                return Math.round(auto);
-            }
+            if (!isNaN(auto) && auto > 0) return Math.round(auto);
             var fin = Number(d.meta_final);
             return !isNaN(fin) && fin > 0 ? Math.round(fin) : null;
         }
@@ -1325,7 +1333,7 @@ def render_equipe_grid(
 ) -> None:
     height = GRID_VIEW_HEIGHT
     nonce = int(st.session_state.get(f"{state_key}_nonce", 0))
-    grid_key = f"{state_key}_ag{'_ro' if locked else ''}{nonce or ''}_nav6"
+    grid_key = f"{state_key}_ag{'_ro' if locked else ''}{nonce or ''}_nav8"
     editor_key = f"{state_key}_ed"
     sync = st.session_state.pop(f"{state_key}_grid_wins", "client_wins")
 

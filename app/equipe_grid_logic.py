@@ -62,11 +62,11 @@ AGGRID_FIELD_LABELS: tuple[tuple[str, str], ...] = (
     ("ticket_sug", "Ticket médio sugerido"),
     ("ticket", "Ticket médio manual"),
     ("fat_media", "Faturamento médio"),
-    ("meta_calc", "Faturamento sugerido"),
+    ("meta_calc", "Quanto entrega"),
     ("meta_man", "Faturamento manual"),
     ("peso_3m", "Peso fat. 3m %"),
-    ("meta_prop", "Meta automática"),
-    ("ajuste", "Ajuste %"),
+    ("meta_prop", "Cota do plano"),
+    ("ajuste", "vs cota %"),
     ("meta_final", "Meta do mês"),
     ("realizado", "Realizado (mês)"),
     ("cob_media", "Cobertura média"),
@@ -794,7 +794,7 @@ def rows_to_aggrid_df(rows: list[dict]) -> pd.DataFrame:
         )
         auto = round(_f(r, "meta_prop_mes_rs"), 0)
         man = round(_f(r, "meta_manual"), 0)
-        final = man if man > 0 else auto
+        final = round(meta_final_row(r), 0)
         data.append(
             {
                 "vid": vid,
@@ -839,7 +839,7 @@ def rows_to_aggrid_df(rows: list[dict]) -> pd.DataFrame:
                 ),
                 "meta_calc": meta_c,
                 "meta_man": man or None,
-                "ajuste": round((final / auto - 1) * 100, 1) if auto > 0 and man > 0 else None,
+                "ajuste": round((final / auto - 1) * 100, 1) if auto > 0 and final > 0 else None,
                 "meta_final": final or None,
                 "realizado": round(_f(r, "realizado_mes"), 0),
             }
@@ -860,9 +860,20 @@ def _ajuste_info(r: dict) -> str:
     return ""
 
 
+def capacidade_row(r: dict) -> float:
+    """Quanto ele entrega com histórico + alavancas (ticket × rec × cobertura)."""
+    return _f(r, "meta_formula")
+
+
 def meta_final_row(r: dict) -> float:
+    """A que vale: manual, senão a capacidade; se não der para calcular, a cota do plano."""
     man = _f(r, "meta_manual")
-    return man if man > 0 else _f(r, "meta_prop_mes_rs")
+    if man > 0:
+        return man
+    cap = capacidade_row(r)
+    if cap > 0:
+        return cap
+    return _f(r, "meta_prop_mes_rs")
 
 
 def patch_rows_from_editor(
